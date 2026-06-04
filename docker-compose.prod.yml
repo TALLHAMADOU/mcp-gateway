@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  gateway:
+    build: .
+    env_file:
+      - .env.production
+    volumes:
+      - ./:/app:ro
+      - /var/run/docker.sock:/var/run/docker.sock  # only if docker access required
+    ports:
+      - '8080:8080'
+    restart: unless-stopped
+    depends_on:
+      - postgres
+
+  postgres:
+    image: postgres:15
+    env_file:
+      - .env.production
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: mcp
+
+volumes:
+  pgdata: {}
+
+networks:
+  default:
+    driver: bridge
+
+# Notes:
+# - Do NOT commit .env.production. Use Vault to provision it before running.
+# - The gateway reads secrets from env (POSTGRES_DSN, GITHUB_TOKEN, NOTION_TOKEN, MCP_GATEWAY_KEY, etc.)

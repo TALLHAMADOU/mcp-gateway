@@ -1,0 +1,10 @@
+version: '3.8'
+services:
+  gateway:
+    image: python:3.11-slim
+    working_dir: /app
+    volumes:
+      - ./:/app
+    command: sh -c "pip install -r requirements.txt && uvicorn src.main:app --host 0.0.0.0 --port 8080"
+    ports:
+      - '8080:8080'

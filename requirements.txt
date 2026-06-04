@@ -1,0 +1,7 @@
+fastapi
+uvicorn[standard]
+httpx
+PyYAML
+docker
+psycopg2-binary
+python-dotenv

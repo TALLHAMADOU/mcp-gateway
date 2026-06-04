@@ -1,0 +1,60 @@
+connectors:
+  - id: fs_local
+    type: builtin_fs
+    description: Local filesystem access (built-in)
+  - id: git_remote
+    type: remote
+    url: http://localhost:9001
+    description: Example remote git MCP
+  - id: inkscape_local
+    type: builtin
+    handler: inkscape
+    description: Inkscape local helper (suggested commands)
+  - id: gimp_local
+    type: builtin
+    handler: gimp
+    description: GIMP local helper
+  - id: krita_local
+    type: builtin
+    handler: krita
+    description: Krita local helper
+  - id: synfig_local
+    type: builtin
+    handler: synfig
+    description: Synfig local helper
+  - id: blender_local
+    type: builtin
+    handler: blender
+    description: Blender local helper
+  - id: figma_local
+    type: builtin
+    handler: figma
+    description: Figma API proxy (requires FIGMA_TOKEN)
+  - id: google_stitch
+    type: builtin
+    handler: google_stitch
+    description: Placeholder for Google Stitch (clarify)
+  - id: github
+    type: builtin
+    handler: github
+    description: GitHub API proxy (requires GITHUB_TOKEN)
+  - id: db_sqlite
+    type: builtin
+    handler: db
+    description: SQLite query connector (local)
+  - id: docker_local
+    type: builtin
+    handler: docker
+    description: Docker daemon access (requires docker socket)
+  - id: chrome_devtools
+    type: builtin
+    handler: chrome_devtools
+    description: Chrome DevTools target listing (requires Chrome with --remote-debugging-port=9222)
+  - id: notion
+    type: builtin
+    handler: notion
+    description: Notion API proxy (requires NOTION_TOKEN)
+  - id: postgres
+    type: builtin
+    handler: postgres
+    description: PostgreSQL read-only connector (uses POSTGRES_DSN or DATABASE_URL env)
