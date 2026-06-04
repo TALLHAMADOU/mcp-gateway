@@ -4,8 +4,8 @@ connectors:
     description: Local filesystem access (built-in)
   - id: git_remote
     type: remote
-    url: http://localhost:9001
-    description: Example remote git MCP
+    url: http://gitea:3000
+    description: Example remote git MCP (gitea service)
   - id: inkscape_local
     type: builtin
     handler: inkscape

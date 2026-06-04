@@ -1,10 +1,49 @@
 version: '3.8'
 services:
   gateway:
-    image: python:3.11-slim
-    working_dir: /app
+    build: .
+    environment:
+      - MCP_GATEWAY_KEY=sk_local_example
+      - POSTGRES_DSN=postgres://postgres:postgres@postgres:5432/mcp
     volumes:
-      - ./:/app
-    command: sh -c "pip install -r requirements.txt && uvicorn src.main:app --host 0.0.0.0 --port 8080"
+      - ./:/app:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: uvicorn src.main:app --host 0.0.0.0 --port 8080
     ports:
       - '8080:8080'
+    depends_on:
+      - postgres
+      - gitea
+      - browserless
+
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: mcp
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  gitea:
+    image: gitea/gitea:1.21
+    environment:
+      - USER_UID=1000
+      - USER_GID=1000
+    volumes:
+      - gitea_data:/data
+    ports:
+      - '3000:3000'
+      - '222:22'
+
+  browserless:
+    image: browserless/chrome:1
+    ports:
+      - '3000:3000'
+    environment:
+      - PREBOOT_CHROME=true
+      - CONNECTION_TIMEOUT=300000
+
+volumes:
+  pgdata: {}
+  gitea_data: {}

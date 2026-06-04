@@ -52,9 +52,30 @@ async def list_connectors(api_key: str = Depends(require_api_key)):
     return cfg.get('connectors', [])
 
 
+import typing
+from fastapi import Header
+
+ADMIN_KEY = os.environ.get('ADMIN_KEY')
+
 @app.post('/v1/admin/register')
-async def register_connector(payload: dict, api_key: str = Depends(require_api_key)):
+async def register_connector(payload: dict, request: Request, api_key: str = Depends(require_api_key), authorization: typing.Optional[str] = Header(None)):
+    # Require ADMIN_KEY if set
+    if ADMIN_KEY:
+        if not authorization:
+            raise HTTPException(status_code=401, detail='Missing Authorization header for admin')
+        token = authorization.split(' ', 1)[1] if authorization.lower().startswith('bearer ') else authorization
+        if token != ADMIN_KEY:
+            raise HTTPException(status_code=403, detail='Invalid admin key')
+    # validate payload
+    if not isinstance(payload, dict) or 'id' not in payload:
+        raise HTTPException(status_code=400, detail='payload must be a dict with at least an "id" field')
     cfg = load_config()
+    existing = next((c for c in cfg.get('connectors', []) if c.get('id') == payload.get('id')), None)
+    if existing:
+        raise HTTPException(status_code=409, detail='connector with given id already exists')
+    # basic shape validation
+    if not payload.get('type') and not payload.get('handler') and not payload.get('url'):
+        raise HTTPException(status_code=400, detail='connector must include type and handler or url')
     cfg.setdefault('connectors', []).append(payload)
     with open(CONFIG_PATH, 'w') as f:
         yaml.safe_dump(cfg, f)
