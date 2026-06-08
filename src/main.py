@@ -1,12 +1,26 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse, Response
 import os, yaml, httpx
-from .auth import require_api_key
+from .auth import require_api_key, API_KEY
+from .mcp_server import mcp, build_mcp_asgi
 
 ROOT = os.getcwd()
 CONFIG_PATH = os.path.join(ROOT, 'servers.yaml')
 
-app = FastAPI(title='MCP Gateway')
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Run the MCP streamable-HTTP session manager for the mounted /mcp app.
+    async with mcp.session_manager.run():
+        yield
+
+
+app = FastAPI(title='MCP Gateway', lifespan=lifespan)
+
+# Native MCP endpoint (Option B): AI assistants connect here over streamable
+# HTTP, authenticated with the same gateway API key.
+app.mount('/mcp', build_mcp_asgi(API_KEY))
 
 # include builtin handlers under /v1 (all protected by the gateway API key)
 from .handlers.fs import router as fs_router

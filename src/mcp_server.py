@@ -1,0 +1,189 @@
+"""Option B — native MCP server (streamable HTTP).
+
+Exposes the gateway's connectors as MCP *tools*, calling the existing handler
+logic **in-process** (no self-HTTP hop). Mounted at ``/mcp`` by ``src/main.py``
+and guarded by the same gateway API key.
+
+Assistants (Claude Code, Codex, Gemini CLI, Copilot CLI) connect to
+``https://<host>/mcp`` with an ``Authorization: Bearer <MCP_GATEWAY_KEY>`` header.
+"""
+import os
+import httpx
+import yaml
+from starlette.concurrency import run_in_threadpool
+from mcp.server.fastmcp import FastMCP
+
+from .handlers import fs as fs_handler
+from .handlers import postgres as pg_handler
+from .handlers import db as db_handler
+from .handlers import docker_handler
+from .handlers.github import gh_get
+from .handlers.notion import NOTION_TOKEN, NOTION_API
+from .handlers.figma import FIGMA_TOKEN, FIGMA_API
+from .handlers.chrome_devtools import CDP_HOST
+from .sql_guard import validate_select
+
+mcp = FastMCP("MCP Gateway")
+# Stateless keeps mounting simple; serve the endpoint at the mount root so the
+# full path is exactly "/mcp" (not "/mcp/mcp").
+mcp.settings.stateless_http = True
+mcp.settings.streamable_http_path = "/"
+
+
+# --- connectors registry ----------------------------------------------------
+@mcp.tool()
+def list_connectors() -> list:
+    """List the connectors declared in servers.yaml."""
+    path = os.path.join(os.getcwd(), "servers.yaml")
+    with open(path) as f:
+        return (yaml.safe_load(f) or {}).get("connectors", [])
+
+
+# --- filesystem (sandboxed via fs_handler._resolve) -------------------------
+@mcp.tool()
+def fs_list(path: str = ".") -> dict:
+    """List a directory inside the gateway filesystem sandbox."""
+    target = fs_handler._resolve(path)
+    if not os.path.isdir(target):
+        raise ValueError("not a directory")
+    return {"path": path, "entries": [
+        {"name": n, "is_dir": os.path.isdir(os.path.join(target, n))}
+        for n in os.listdir(target)
+    ]}
+
+
+@mcp.tool()
+def fs_read(path: str) -> str:
+    """Read a UTF-8 text file inside the filesystem sandbox."""
+    target = fs_handler._resolve(path)
+    if not os.path.isfile(target):
+        raise ValueError("file not found")
+    with open(target, "r", encoding="utf-8", errors="replace") as f:
+        return f.read()
+
+
+# --- SQL (read-only) --------------------------------------------------------
+@mcp.tool()
+async def pg_query(sql: str, params: list | None = None) -> dict:
+    """Run a read-only SELECT against the configured Postgres (POSTGRES_DSN)."""
+    dsn = pg_handler.POSTGRES_DSN
+    if not dsn:
+        raise ValueError("Postgres DSN not configured (POSTGRES_DSN / DATABASE_URL)")
+    return await run_in_threadpool(pg_handler._run_query, dsn, sql, params)
+
+
+@mcp.tool()
+async def sqlite_query(db_path: str, sql: str, params: list | None = None) -> dict:
+    """Run a read-only SELECT against a local SQLite file."""
+    sql = validate_select(sql)
+    return await run_in_threadpool(db_handler._run_sqlite_query, db_path, sql, params)
+
+
+# --- GitHub -----------------------------------------------------------------
+@mcp.tool()
+async def github_repo(owner: str, repo: str) -> dict:
+    """Fetch GitHub repository metadata."""
+    return (await gh_get(f"repos/{owner}/{repo}")).json()
+
+
+@mcp.tool()
+async def github_issues(owner: str, repo: str, state: str = "open") -> list:
+    """List GitHub issues for a repository (state: open/closed/all)."""
+    return (await gh_get(f"repos/{owner}/{repo}/issues", params={"state": state})).json()
+
+
+@mcp.tool()
+async def github_pulls(owner: str, repo: str, state: str = "open") -> list:
+    """List GitHub pull requests for a repository (state: open/closed/all)."""
+    return (await gh_get(f"repos/{owner}/{repo}/pulls", params={"state": state})).json()
+
+
+# --- Notion -----------------------------------------------------------------
+@mcp.tool()
+async def notion_page(page_id: str) -> dict:
+    """Fetch a Notion page by id (requires NOTION_TOKEN)."""
+    if not NOTION_TOKEN:
+        raise ValueError("NOTION_TOKEN not configured")
+    headers = {"Authorization": f"Bearer {NOTION_TOKEN}", "Notion-Version": "2022-06-28"}
+    async with httpx.AsyncClient(timeout=30) as c:
+        return (await c.get(f"{NOTION_API}/pages/{page_id}", headers=headers)).json()
+
+
+@mcp.tool()
+async def notion_db_query(database_id: str) -> dict:
+    """Query a Notion database by id (requires NOTION_TOKEN)."""
+    if not NOTION_TOKEN:
+        raise ValueError("NOTION_TOKEN not configured")
+    headers = {"Authorization": f"Bearer {NOTION_TOKEN}", "Notion-Version": "2022-06-28",
+               "Content-Type": "application/json"}
+    async with httpx.AsyncClient(timeout=30) as c:
+        return (await c.post(f"{NOTION_API}/databases/{database_id}/query",
+                             headers=headers)).json()
+
+
+# --- Figma ------------------------------------------------------------------
+@mcp.tool()
+async def figma_file(file_key: str, node_id: str | None = None) -> dict:
+    """Fetch a Figma file (optionally a specific node) — requires FIGMA_TOKEN."""
+    if not FIGMA_TOKEN:
+        raise ValueError("FIGMA_TOKEN not configured")
+    params = {"ids": node_id} if node_id else None
+    async with httpx.AsyncClient(timeout=30) as c:
+        return (await c.get(f"{FIGMA_API}/files/{file_key}",
+                            headers={"X-Figma-Token": FIGMA_TOKEN}, params=params)).json()
+
+
+# --- Docker (inspection) ----------------------------------------------------
+@mcp.tool()
+async def docker_ps() -> list:
+    """List Docker containers (all states)."""
+    return await run_in_threadpool(docker_handler._ps)
+
+
+@mcp.tool()
+async def docker_images() -> list:
+    """List Docker images."""
+    return await run_in_threadpool(docker_handler._images)
+
+
+@mcp.tool()
+async def docker_inspect(id_or_name: str) -> dict:
+    """Inspect a Docker container by id or name."""
+    return await run_in_threadpool(docker_handler._inspect, id_or_name)
+
+
+# --- Chrome DevTools --------------------------------------------------------
+@mcp.tool()
+async def chrome_targets() -> list:
+    """List Chrome DevTools targets (CHROME_DEBUG_HOST)."""
+    async with httpx.AsyncClient(timeout=10) as c:
+        return (await c.get(f"{CDP_HOST}/json")).json()
+
+
+# --- ASGI auth wrapper for the mounted MCP app ------------------------------
+class BearerAuthASGI:
+    """Guards the mounted MCP ASGI app with the gateway API key."""
+
+    def __init__(self, app, api_key: str):
+        self.app = app
+        self.api_key = api_key
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        headers = dict(scope.get("headers") or [])
+        raw = headers.get(b"authorization", b"").decode()
+        token = raw[7:] if raw[:7].lower() == "bearer " else raw
+        if token != self.api_key:
+            await send({"type": "http.response.start", "status": 401,
+                        "headers": [(b"content-type", b"application/json")]})
+            await send({"type": "http.response.body",
+                        "body": b'{"detail":"Invalid or missing API key"}'})
+            return
+        await self.app(scope, receive, send)
+
+
+def build_mcp_asgi(api_key: str):
+    """Return the MCP streamable-HTTP app wrapped with bearer auth."""
+    return BearerAuthASGI(mcp.streamable_http_app(), api_key)

@@ -94,29 +94,69 @@ export VAULT_ADDR=...; export VAULT_TOKEN=...
 
 ## Endpoints
 
-| Méthode | Route | Auth | Description |
-|---|---|---|---|
-| GET | `/v1/connectors` | ✅ clé API | Liste les connecteurs |
-| POST | `/v1/admin/register` | ✅ clé API + `ADMIN_KEY` | Ajoute un connecteur à `servers.yaml` |
-| * | `/v1/proxy/{connector_id}/{path}` | ✅ clé API | Proxy pour connecteurs `remote` |
-| GET | `/v1/fs/list`, `/v1/fs/read` | ⚠️ **non authentifié** | Filesystem |
-| POST | `/v1/postgres/query`, `/v1/db/sqlite/query` | ⚠️ **non authentifié** | SQL SELECT-only |
-| GET | `/v1/docker/ps`, `/images`, `/inspect/{id}` | ⚠️ **non authentifié** | Inspection Docker |
-| GET | `/v1/github/...`, `/v1/notion/...`, `/v1/figma/...` | ⚠️ **non authentifié** | Proxys API |
-| GET | `/v1/chrome/targets`, `/v1/{handler}/health` | ⚠️ **non authentifié** | Divers |
+Toutes les routes ci-dessous exigent l'en-tête `Authorization: Bearer <MCP_GATEWAY_KEY>`.
+
+| Méthode | Route | Description |
+|---|---|---|
+| * | `/mcp` | **Endpoint MCP natif** (streamable HTTP) — branchement des assistants IA |
+| GET | `/v1/connectors` | Liste les connecteurs |
+| POST | `/v1/admin/register` | Ajoute un connecteur (requiert aussi `ADMIN_KEY`) |
+| * | `/v1/proxy/{connector_id}/{path}` | Proxy pour connecteurs `remote` |
+| GET | `/v1/fs/list`, `/v1/fs/read` | Filesystem (sandbox `FS_ROOT`) |
+| POST | `/v1/postgres/query`, `/v1/db/sqlite/query` | SQL SELECT-only (read-only) |
+| GET | `/v1/docker/ps`, `/images`, `/inspect/{id}` | Inspection Docker |
+| GET | `/v1/github/...`, `/v1/notion/...`, `/v1/figma/...` | Proxys API |
+| GET | `/v1/chrome/targets` | Cibles Chrome DevTools |
+
+## Brancher vos assistants IA (MCP — Option B)
+
+Le gateway expose un **serveur MCP natif** sur `/mcp` (transport *streamable HTTP*), authentifié par `MCP_GATEWAY_KEY`. Les connecteurs sont exposés comme *tools* MCP (`fs_read`, `fs_list`, `pg_query`, `sqlite_query`, `github_repo`, `github_issues`, `github_pulls`, `notion_page`, `notion_db_query`, `figma_file`, `docker_ps`, `docker_images`, `docker_inspect`, `chrome_targets`, `list_connectors`) appelés **in-process**.
+
+```bash
+# Claude Code
+claude mcp add --transport http mcp-gateway https://gw.example.com/mcp \
+  --header "Authorization: Bearer $MCP_GATEWAY_KEY"
+```
+
+```jsonc
+// Gemini CLI — ~/.gemini/settings.json
+{ "mcpServers": { "mcp-gateway": {
+  "httpUrl": "https://gw.example.com/mcp",
+  "headers": { "Authorization": "Bearer sk_prod..." }
+}}}
+```
+
+```toml
+# Codex CLI — ~/.codex/config.toml
+[mcp_servers.mcp-gateway]
+url = "https://gw.example.com/mcp"
+headers = { Authorization = "Bearer sk_prod..." }
+```
+
+```bash
+# GitHub Copilot CLI (serveur MCP HTTP, en-tête d'auth identique)
+copilot mcp add --type http --url https://gw.example.com/mcp \
+  --header "Authorization: Bearer $MCP_GATEWAY_KEY" mcp-gateway
+```
+
+> Le détail exact des flags/clés de config peut varier selon la version de chaque CLI ; le contrat reste : **URL `…/mcp` + en-tête `Authorization: Bearer`**.
 
 ## Sécurité & limitations connues
 
-Ce dépôt est un **MVP**. Avant toute exposition réseau, traiter les points suivants :
+Ce dépôt était un MVP ; les trous critiques ont été corrigés. État actuel :
 
-1. **🔴 Handlers builtin non authentifiés.** `require_api_key` n'est appliqué qu'à `/v1/connectors`, `/v1/admin/register` et `/v1/proxy`. Tous les handlers (`/v1/fs`, `/v1/postgres`, `/v1/db`, `/v1/docker`, `/v1/github`…) sont **ouverts**. → appliquer la dépendance d'auth globalement (router-level `dependencies=[Depends(require_api_key)]`).
-2. **🔴 Path traversal `/v1/fs`.** Aucune restriction de chemin : un chemin absolu ou `../` sort du répertoire de travail. → confiner sous une racine autorisée et rejeter `..` / chemins absolus.
-3. **🔴 Le proxy retransmet l'`Authorization`** au connecteur amont (seul `host` est retiré). → filtrer `authorization` et headers sensibles.
-4. **🟠 `fs.py` `/read`** référence `Response` sans l'importer → 500. → `from fastapi.responses import Response`.
-5. **🟡 Garde SQL contournable** (`startswith("select")` : CTE `WITH`, requêtes empilées). `db.py` accepte un `db_path` arbitraire.
-6. **🟡 `requirements.txt` non épinglé** → builds non reproductibles. → figer les versions.
-7. **🟡 Aucun test** (la CI passe en « No tests to run »).
-8. **🟡 Docker `inspect`** expose les variables d'env (secrets) des conteneurs.
+| # | Point | Statut |
+|---|---|---|
+| 1 | Auth appliquée à **tous** les handlers (`dependencies=[Depends(require_api_key)]`) | ✅ corrigé |
+| 2 | Sandbox filesystem `/v1/fs` (rejet absolus + `..`, racine `FS_ROOT`) | ✅ corrigé |
+| 3 | Le proxy ne retransmet plus `authorization`/`host`/`content-length`/`connection` | ✅ corrigé |
+| 4 | `fs.py /read` : import `Response` manquant | ✅ corrigé |
+| 5 | Garde SQL durcie (`sql_guard`) + transaction PG `READ ONLY` + SQLite `mode=ro` | ✅ corrigé |
+| 6 | Dépendances épinglées (`requirements.txt`) | ✅ corrigé |
+| 7 | Tests `pytest` + CI exécute la suite | ✅ corrigé |
+| 8 | Docker `inspect` expose les env (secrets) des conteneurs | ⚠️ par design — restreindre via réseau/rôle |
+
+> ⚠️ **Note Docker** : `docker_ps`/`docker_inspect` exposent la configuration des conteneurs (dont variables d'environnement). Réserver ce connecteur à des environnements de confiance.
 
 ### Bonnes pratiques de déploiement
 
@@ -155,11 +195,13 @@ Config Claude Code (exemple) :
 
 ## Roadmap
 
-- [ ] Auth appliquée à tous les handlers (router-level dependency)
-- [ ] Confinement filesystem + correctif import `Response`
+- [x] Auth appliquée à tous les handlers (router-level dependency)
+- [x] Confinement filesystem + correctif import `Response`
+- [x] Garde SQL read-only (app + DB)
+- [x] Tests unitaires + exécution en CI
+- [x] Versions épinglées dans `requirements.txt`
+- [x] Serveur MCP natif sur `/mcp` (streamable HTTP) — branchement des assistants
 - [ ] Auth avancée : OAuth2, mTLS, RBAC
-- [ ] Tests unitaires + couverture CI
-- [ ] Versions épinglées dans `requirements.txt`
 - [ ] Plugin loader réel (actuellement stub)
 - [ ] Proxy WebSocket CDP complet (Chrome DevTools)
 - [ ] UI d'administration
