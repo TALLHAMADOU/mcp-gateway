@@ -58,3 +58,15 @@ connectors:
     type: builtin
     handler: postgres
     description: PostgreSQL read-only connector (uses POSTGRES_DSN or DATABASE_URL env)
+  - id: office_local
+    type: builtin
+    handler: office
+    description: Local DOCX/XLSX/PPTX generation + LibreOffice headless conversion
+  - id: google_workspace
+    type: builtin
+    handler: google_workspace
+    description: Google Workspace (Drive/Docs/Sheets/Slides) - requires GOOGLE_ACCESS_TOKEN
+  - id: ms_graph
+    type: builtin
+    handler: ms_graph
+    description: Microsoft 365 via Graph (OneDrive/Word/Excel/PPT) - requires MS_GRAPH_TOKEN

@@ -21,6 +21,9 @@ from .handlers.github import gh_get
 from .handlers.notion import NOTION_TOKEN, NOTION_API
 from .handlers.figma import FIGMA_TOKEN, FIGMA_API
 from .handlers.chrome_devtools import CDP_HOST
+from .handlers import office as office_handler
+from .handlers import google_workspace as gws
+from .handlers import ms_graph as msg
 from .sql_guard import validate_select
 
 mcp = FastMCP("MCP Gateway")
@@ -158,6 +161,87 @@ async def chrome_targets() -> list:
     """List Chrome DevTools targets (CHROME_DEBUG_HOST)."""
     async with httpx.AsyncClient(timeout=10) as c:
         return (await c.get(f"{CDP_HOST}/json")).json()
+
+
+# --- Office (local generation + LibreOffice conversion) ---------------------
+@mcp.tool()
+async def office_create_docx(spec: dict) -> dict:
+    """Create a .docx. spec: {filename, elements:[{type:heading|paragraph|bullet, text, level}]}."""
+    return {"path": await run_in_threadpool(office_handler.make_docx, spec)}
+
+
+@mcp.tool()
+async def office_create_xlsx(spec: dict) -> dict:
+    """Create a .xlsx. spec: {filename, sheets:[{name, rows:[[...],...]}]}."""
+    return {"path": await run_in_threadpool(office_handler.make_xlsx, spec)}
+
+
+@mcp.tool()
+async def office_create_pptx(spec: dict) -> dict:
+    """Create a .pptx. spec: {filename, slides:[{title, bullets:[...] | body}]}."""
+    return {"path": await run_in_threadpool(office_handler.make_pptx, spec)}
+
+
+@mcp.tool()
+async def office_convert(source_path: str, to: str) -> dict:
+    """Convert/export a document via LibreOffice headless (e.g. to='pdf')."""
+    return {"path": await run_in_threadpool(office_handler.convert_file, source_path, to)}
+
+
+# --- Google Workspace -------------------------------------------------------
+@mcp.tool()
+async def gdrive_files(q: str | None = None, page_size: int = 50) -> dict:
+    """List Google Drive files (optional Drive query `q`)."""
+    return await gws.drive_files(q=q, page_size=page_size)
+
+
+@mcp.tool()
+async def gdoc_get(document_id: str) -> dict:
+    """Fetch a Google Doc by id."""
+    return await gws.get_doc(document_id)
+
+
+@mcp.tool()
+async def gdoc_create(title: str) -> dict:
+    """Create a new empty Google Doc."""
+    return await gws.create_doc({"title": title})
+
+
+@mcp.tool()
+async def gsheet_values(spreadsheet_id: str, range_a1: str) -> dict:
+    """Read values from a Google Sheet range (A1 notation)."""
+    return await gws.get_sheet_values(spreadsheet_id, range_a1)
+
+
+@mcp.tool()
+async def gslides_get(presentation_id: str) -> dict:
+    """Fetch a Google Slides presentation by id."""
+    return await gws.get_slides(presentation_id)
+
+
+# --- Microsoft 365 (Graph) --------------------------------------------------
+@mcp.tool()
+async def onedrive_root() -> dict:
+    """List the root of the user's OneDrive."""
+    return await msg.onedrive_root()
+
+
+@mcp.tool()
+async def onedrive_search(q: str) -> dict:
+    """Search files in OneDrive."""
+    return await msg.search_files(q)
+
+
+@mcp.tool()
+async def msexcel_worksheets(item_id: str) -> dict:
+    """List worksheets of an Excel workbook stored in OneDrive (drive item id)."""
+    return await msg.excel_worksheets(item_id)
+
+
+@mcp.tool()
+async def msexcel_range(item_id: str, name: str) -> dict:
+    """Read the used range of a worksheet in an Excel workbook on OneDrive."""
+    return await msg.excel_used_range(item_id, name)
 
 
 # --- ASGI auth wrapper for the mounted MCP app ------------------------------

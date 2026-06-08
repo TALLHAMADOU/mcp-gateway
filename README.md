@@ -42,6 +42,9 @@ MCP Gateway centralise et standardise l'accès à plusieurs connecteurs MCP pour
 | `chrome_devtools` | builtin | chrome_devtools | Requiert Chrome `--remote-debugging-port=9222` |
 | `notion` | builtin | notion | Requiert `NOTION_TOKEN` |
 | `postgres` | builtin | postgres | SELECT-only, requiert `POSTGRES_DSN`/`DATABASE_URL` |
+| `office_local` | builtin | office | Génère DOCX/XLSX/PPTX + conversion PDF (LibreOffice headless) |
+| `google_workspace` | builtin | google_workspace | Drive/Docs/Sheets/Slides, requiert `GOOGLE_ACCESS_TOKEN` |
+| `ms_graph` | builtin | ms_graph | OneDrive/Word/Excel/PPT (365), requiert `MS_GRAPH_TOKEN` |
 
 ## Développement (local)
 
@@ -91,6 +94,9 @@ export VAULT_ADDR=...; export VAULT_TOKEN=...
 | `POSTGRES_DSN` ou `DATABASE_URL` | Connexion Postgres |
 | `PG_MIN_CONN` / `PG_MAX_CONN` / `PG_STATEMENT_TIMEOUT_MS` / `PG_MAX_ROWS` | Pool + garde-fous |
 | `CHROME_DEBUG_HOST` | Endpoint CDP (défaut `http://localhost:9222`) |
+| `GOOGLE_ACCESS_TOKEN` | Token OAuth2 Google Workspace (Drive/Docs/Sheets/Slides) |
+| `MS_GRAPH_TOKEN` | Token Microsoft Graph (OneDrive/Word/Excel/PPT 365) |
+| `OFFICE_OUTPUT_DIR` | Dossier de sortie des fichiers générés (défaut `<FS_ROOT>/output`) |
 
 ## Endpoints
 
@@ -110,7 +116,14 @@ Toutes les routes ci-dessous exigent l'en-tête `Authorization: Bearer <MCP_GATE
 
 ## Brancher vos assistants IA (MCP — Option B)
 
-Le gateway expose un **serveur MCP natif** sur `/mcp` (transport *streamable HTTP*), authentifié par `MCP_GATEWAY_KEY`. Les connecteurs sont exposés comme *tools* MCP (`fs_read`, `fs_list`, `pg_query`, `sqlite_query`, `github_repo`, `github_issues`, `github_pulls`, `notion_page`, `notion_db_query`, `figma_file`, `docker_ps`, `docker_images`, `docker_inspect`, `chrome_targets`, `list_connectors`) appelés **in-process**.
+Le gateway expose un **serveur MCP natif** sur `/mcp` (transport *streamable HTTP*), authentifié par `MCP_GATEWAY_KEY`. Les connecteurs sont exposés comme *tools* MCP appelés **in-process** :
+
+- **Dev/infra** : `fs_read`, `fs_list`, `pg_query`, `sqlite_query`, `github_repo`, `github_issues`, `github_pulls`, `notion_page`, `notion_db_query`, `figma_file`, `docker_ps`, `docker_images`, `docker_inspect`, `chrome_targets`, `list_connectors`
+- **Bureautique (local)** : `office_create_docx`, `office_create_xlsx`, `office_create_pptx`, `office_convert`
+- **Google Workspace** : `gdrive_files`, `gdoc_get`, `gdoc_create`, `gsheet_values`, `gslides_get`
+- **Microsoft 365 (Graph)** : `onedrive_root`, `onedrive_search`, `msexcel_worksheets`, `msexcel_range`
+
+> ℹ️ La conversion/export PDF (`office_convert`) requiert **LibreOffice** installé sur l'hôte (`soffice`). Pour les **logos/designs**, utilise les connecteurs déjà présents **Inkscape** (vectoriel) et **GIMP** (raster) — il n'existe pas de MCP Photoshop/Adobe headless sous Linux.
 
 ```bash
 # Claude Code

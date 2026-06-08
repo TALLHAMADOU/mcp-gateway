@@ -37,6 +37,9 @@ from .handlers.docker_handler import router as docker_router
 from .handlers.chrome_devtools import router as chrome_router
 from .handlers.notion import router as notion_router
 from .handlers.postgres import router as postgres_router
+from .handlers.office import router as office_router
+from .handlers.google_workspace import router as gworkspace_router
+from .handlers.ms_graph import router as ms_graph_router
 
 _AUTH = [Depends(require_api_key)]
 
@@ -54,6 +57,9 @@ app.include_router(docker_router, prefix='/v1/docker', dependencies=_AUTH)
 app.include_router(chrome_router, prefix='/v1/chrome', dependencies=_AUTH)
 app.include_router(notion_router, prefix='/v1/notion', dependencies=_AUTH)
 app.include_router(postgres_router, prefix='/v1/postgres', dependencies=_AUTH)
+app.include_router(office_router, prefix='/v1/office', dependencies=_AUTH)
+app.include_router(gworkspace_router, prefix='/v1/google-workspace', dependencies=_AUTH)
+app.include_router(ms_graph_router, prefix='/v1/ms-graph', dependencies=_AUTH)
 
 
 def load_config():
