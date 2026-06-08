@@ -1,7 +1,7 @@
-fastapi
-uvicorn[standard]
-httpx
-PyYAML
-docker
-psycopg2-binary
-python-dotenv
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+httpx==0.28.1
+PyYAML==6.0.2
+docker==7.1.0
+psycopg2-binary==2.9.10
+python-dotenv==1.0.1

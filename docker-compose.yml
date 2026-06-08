@@ -39,7 +39,7 @@ services:
   browserless:
     image: browserless/chrome:1
     ports:
-      - '3000:3000'
+      - '3001:3000'  # gitea already uses host :3000
     environment:
       - PREBOOT_CHROME=true
       - CONNECTION_TIMEOUT=300000

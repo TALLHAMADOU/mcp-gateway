@@ -1,145 +1,173 @@
-MCP Gateway — Point d’entrée centralisé pour MCP (FastAPI)
+# MCP Gateway
 
-Résumé
--------
-MCP Gateway centralise et standardise l’accès à plusieurs MCP (connecteurs) pour vos CLI et agents IA. Objectif : partager configuration, secrets et outils (filesystem, git, GitHub, DB, Docker, Search, design APIs, Chrome DevTools, etc.) via un seul endpoint sécurisé.
+> Point d'entrée centralisé pour MCP (Model Context Protocol) — FastAPI
 
-Cas d’usage
-----------
-- Unifier la configuration MCP pour Claude Code, Codex, Gemini CLI et autres
-- Exposer des handlers locaux (Inkscape, Blender, GIMP) et proxys API (GitHub, Notion, Figma)
-- Fournir une façade sécurisée (API key / Vault) et protections (pooling, timeouts)
+MCP Gateway centralise et standardise l'accès à plusieurs connecteurs MCP pour vos CLI et agents IA (Claude Code, Codex, Gemini CLI…). Objectif : partager configuration, secrets et outils (filesystem, git, GitHub, DB, Docker, design APIs, Chrome DevTools…) derrière **un seul endpoint**.
 
-Fonctionnalités (MVP)
----------------------
-- FastAPI gateway avec route /v1/connectors et /v1/proxy/{connector_id}
-- Connecteurs builtin : filesystem, inkscape, gimp, krita, synfig, blender, figma, google-stitch, github, notion, chrome-devtools, docker, sqlite, postgres
-- PostgreSQL read-only avec pooling, statement_timeout et limite de rows
-- Notion / Figma / GitHub proxys (utilisent tokens via env)
-- Docker SDK inspection endpoints, Chrome DevTools targets listing
-- Admin minimal : POST /v1/admin/register pour ajouter dynamiquement un connector (modifie servers.yaml)
+> ⚠️ **Statut : MVP / non production-ready.** Voir [Sécurité & limitations connues](#sécurité--limitations-connues) avant toute exposition réseau.
 
-Connecteurs actuels (servers.yaml)
----------------------------------
-1) fs_local
-2) git_remote (remote)
-3) inkscape_local
-4) gimp_local
-5) krita_local
-6) synfig_local
-7) blender_local
-8) figma_local
-9) google_stitch
-10) github
-11) db_sqlite
-12) docker_local
-13) chrome_devtools
-14) notion
-15) postgres
+---
 
-Installation — Développement (local)
------------------------------------
-1) Cloner : git clone <repo> && cd mcp-gateway
-2) Créer venv et installer :
-   python3 -m venv .venv && source .venv/bin/activate
-   pip install -r requirements.txt
-3) Lancer en local :
-   export MCP_GATEWAY_KEY=sk_local_example
-   ./scripts/dev.sh
-4) Tests rapides :
-   curl -H "Authorization: Bearer sk_local_example" http://localhost:8080/v1/connectors
+## Cas d'usage
 
-Production (recommended)
-------------------------
-Stack fournie : docker-compose.prod.yml + script deploy_prod.sh + infra/vault instructions
-- Stocker secrets dans Vault KV v2 (ex: secret/mcp-gateway)
-- Sur la machine de déploiement :
-  export VAULT_ADDR=...; export VAULT_TOKEN=...
-  ./scripts/deploy_prod.sh
-- Ne commitez jamais .env.production
+- Unifier la configuration MCP pour Claude Code, Codex, Gemini CLI et autres.
+- Exposer des handlers locaux (Inkscape, Blender, GIMP, Krita, Synfig) et des proxys API (GitHub, Notion, Figma).
+- Fournir une façade unique avec clé API et, en prod, secrets via Vault.
 
-Configuration & Secrets
------------------------
-- Configuration principale : servers.yaml (source of truth pour connectors)
-- Secrets runtime : via Vault (preferred) ou .env.production (local/backups)
-- Variables importantes :
-  MCP_GATEWAY_KEY — clé API (Auth)
-  GITHUB_TOKEN, NOTION_TOKEN, FIGMA_TOKEN — API tokens
-  POSTGRES_DSN or DATABASE_URL — chaîne de connexion Postgres
-  PG_MIN_CONN, PG_MAX_CONN, PG_STATEMENT_TIMEOUT_MS, PG_MAX_ROWS — pool + protections
+## Fonctionnalités (MVP)
 
-Endpoints clés
---------------
-- GET  /v1/connectors                       — lister connectors (auth)
-- POST /v1/admin/register                   — ajouter connector (auth)
-- GET  /v1/proxy/{connector_id}/{path}      — proxy pour connectors remote
-- Builtin handlers: /v1/fs, /v1/github, /v1/postgres, /v1/db, /v1/docker, /v1/chrome, /v1/figma, etc.
+- Gateway FastAPI : `/v1/connectors`, `/v1/proxy/{connector_id}/{path}`, `/v1/admin/register`.
+- 14 connecteurs builtin (voir tableau).
+- PostgreSQL **lecture seule** avec pooling, `statement_timeout` et limite de lignes.
+- Proxys GitHub / Notion / Figma (tokens via variables d'environnement).
+- Inspection Docker (SDK) et listing des cibles Chrome DevTools.
+- Admin minimal : `POST /v1/admin/register` ajoute un connecteur dans `servers.yaml`.
 
-Sécurité & bonnes pratiques
----------------------------
-- TLS en frontal (nginx, Traefik) pour production
-- Utiliser Vault pour gérer secrets et tokens
-- Ne jamais exposer l’interface admin sans authentification forte
-- Créer des rôles DB readonly pour le gateway
-- Activer surveillance : Prometheus + alertes pour pool saturation
+## Connecteurs (`servers.yaml`)
 
-Exemples de configuration CLI
------------------------------
-- Variables d’environnement (recommandé) :
-  export MCP_GATEWAY_URL="https://mcp-gateway.example.com"
-  export MCP_GATEWAY_KEY="sk_prod..."
+| id | type | handler | Notes |
+|---|---|---|---|
+| `fs_local` | builtin_fs | — | Lecture fichiers (⚠️ voir limitations) |
+| `git_remote` | remote | — | Proxy vers service gitea |
+| `inkscape_local` | builtin | inkscape | Helper local |
+| `gimp_local` | builtin | gimp | Helper local |
+| `krita_local` | builtin | krita | Helper local |
+| `synfig_local` | builtin | synfig | Helper local |
+| `blender_local` | builtin | blender | Helper local |
+| `figma_local` | builtin | figma | Requiert `FIGMA_TOKEN` |
+| `google_stitch` | builtin | google_stitch | Placeholder (à clarifier) |
+| `github` | builtin | github | Requiert `GITHUB_TOKEN` |
+| `db_sqlite` | builtin | db | SQLite SELECT-only |
+| `docker_local` | builtin | docker | Requiert accès au socket Docker |
+| `chrome_devtools` | builtin | chrome_devtools | Requiert Chrome `--remote-debugging-port=9222` |
+| `notion` | builtin | notion | Requiert `NOTION_TOKEN` |
+| `postgres` | builtin | postgres | SELECT-only, requiert `POSTGRES_DSN`/`DATABASE_URL` |
 
-- Claude Code (exemple JSON config) :
-  {
-    "mcp": {"gateway": "https://mcp-gateway.example.com", "api_key": "sk_prod..."}
-  }
+## Développement (local)
 
-- Codex / Gemini CLI (env) :
-  export MCP_GATEWAY_URL=http://localhost:8080
-  export MCP_GATEWAY_KEY=sk_local_example
+```bash
+git clone <repo> && cd mcp-gateway
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
 
-Exemple d’appel GitHub via gateway :
-  curl -H "Authorization: Bearer $MCP_GATEWAY_KEY" \
-    http://localhost:8080/v1/github/repos/<owner>/<repo>
+export MCP_GATEWAY_KEY=sk_local_example
+./scripts/dev.sh                       # uvicorn --reload sur :8080
 
-Comment ajouter un nouveau connector
------------------------------------
-1) Modifier servers.yaml et ajouter une entrée (id, type, handler, url si remote)
-2) Pour handlers builtin : ajouter un module dans src/handlers et monter la route dans src/main.py
-3) Redémarrer le service (ou reload si implémenté)
-4) Écrire tests simples (curl) et documenter les endpoints
+# test
+curl -H "Authorization: Bearer sk_local_example" http://localhost:8080/v1/connectors
+```
 
-Observabilité & monitoring
---------------------------
-- Recommander : exporter métriques Prometheus (request latencies, pool usage)
-- Alerts : DB pool exhaustion, high latency, 5xx rate
+### Docker Compose
 
-Roadmap (prochaine phases)
---------------------------
-- Auth avancée : OAuth2, mTLS, RBAC
-- Vault Agent / Docker secrets injection
-- Webhooks (GitHub) et in-process Git operations
-- Chrome DevTools websocket proxy (full CDP)
-- Search MCP (local rg/semantic)
-- UI d’administration (liste/connectors/test)
+```bash
+docker compose up --build
+```
 
-Contribution
-------------
-- Fork, créer une branch feature/* puis PR
-- Respecter tests unitaires et linters (préférences à définir)
+> ⚠️ **Bug connu** : dans `docker-compose.yml`, les services `gitea` et `browserless` exposent tous deux le port hôte `3000` → conflit au démarrage. Remappez l'un (ex. `browserless` sur `3001:3000`) avant de lancer.
 
-Mots-clés pour GitHub (topics) — suggestions
--------------------------------------------
-mcp-gateway, gateway, fastapi, ai-tooling, developer-tooling, devops, docker, postgres, github, notion, figma, chrome-devtools
+## Production
 
-Licence
--------
-Choisir une licence (MIT recommandé) — inclure LICENSE dans le repo.
+Stack fournie : `docker-compose.prod.yml` + `scripts/deploy_prod.sh` + `infra/vault/`.
 
-Contact
--------
-Ouvrir une issue ou PR si vous souhaitez une intégration spécifique.
+```bash
+export VAULT_ADDR=...; export VAULT_TOKEN=...
+./scripts/deploy_prod.sh
+```
 
-----
+- Stocker les secrets dans Vault (KV v2, ex. `secret/mcp-gateway`).
+- **Ne jamais committer `.env.production`** (déjà dans `.gitignore`).
+- Mettre un reverse-proxy TLS (nginx / Traefik) en frontal.
 
-README généré automatiquement par l’agent. Adaptez la section "Production" selon vos règles d’exploitation.
+## Configuration & secrets
+
+- **Source de vérité des connecteurs** : `servers.yaml`.
+- **Secrets runtime** : Vault (préféré) ou `.env.production`.
+
+| Variable | Rôle |
+|---|---|
+| `MCP_GATEWAY_KEY` | Clé API d'authentification (défaut : `sk_local_example`) |
+| `ADMIN_KEY` | Si défini, protège `POST /v1/admin/register` (Bearer) |
+| `GITHUB_TOKEN` / `NOTION_TOKEN` / `FIGMA_TOKEN` | Tokens des proxys API |
+| `POSTGRES_DSN` ou `DATABASE_URL` | Connexion Postgres |
+| `PG_MIN_CONN` / `PG_MAX_CONN` / `PG_STATEMENT_TIMEOUT_MS` / `PG_MAX_ROWS` | Pool + garde-fous |
+| `CHROME_DEBUG_HOST` | Endpoint CDP (défaut `http://localhost:9222`) |
+
+## Endpoints
+
+| Méthode | Route | Auth | Description |
+|---|---|---|---|
+| GET | `/v1/connectors` | ✅ clé API | Liste les connecteurs |
+| POST | `/v1/admin/register` | ✅ clé API + `ADMIN_KEY` | Ajoute un connecteur à `servers.yaml` |
+| * | `/v1/proxy/{connector_id}/{path}` | ✅ clé API | Proxy pour connecteurs `remote` |
+| GET | `/v1/fs/list`, `/v1/fs/read` | ⚠️ **non authentifié** | Filesystem |
+| POST | `/v1/postgres/query`, `/v1/db/sqlite/query` | ⚠️ **non authentifié** | SQL SELECT-only |
+| GET | `/v1/docker/ps`, `/images`, `/inspect/{id}` | ⚠️ **non authentifié** | Inspection Docker |
+| GET | `/v1/github/...`, `/v1/notion/...`, `/v1/figma/...` | ⚠️ **non authentifié** | Proxys API |
+| GET | `/v1/chrome/targets`, `/v1/{handler}/health` | ⚠️ **non authentifié** | Divers |
+
+## Sécurité & limitations connues
+
+Ce dépôt est un **MVP**. Avant toute exposition réseau, traiter les points suivants :
+
+1. **🔴 Handlers builtin non authentifiés.** `require_api_key` n'est appliqué qu'à `/v1/connectors`, `/v1/admin/register` et `/v1/proxy`. Tous les handlers (`/v1/fs`, `/v1/postgres`, `/v1/db`, `/v1/docker`, `/v1/github`…) sont **ouverts**. → appliquer la dépendance d'auth globalement (router-level `dependencies=[Depends(require_api_key)]`).
+2. **🔴 Path traversal `/v1/fs`.** Aucune restriction de chemin : un chemin absolu ou `../` sort du répertoire de travail. → confiner sous une racine autorisée et rejeter `..` / chemins absolus.
+3. **🔴 Le proxy retransmet l'`Authorization`** au connecteur amont (seul `host` est retiré). → filtrer `authorization` et headers sensibles.
+4. **🟠 `fs.py` `/read`** référence `Response` sans l'importer → 500. → `from fastapi.responses import Response`.
+5. **🟡 Garde SQL contournable** (`startswith("select")` : CTE `WITH`, requêtes empilées). `db.py` accepte un `db_path` arbitraire.
+6. **🟡 `requirements.txt` non épinglé** → builds non reproductibles. → figer les versions.
+7. **🟡 Aucun test** (la CI passe en « No tests to run »).
+8. **🟡 Docker `inspect`** expose les variables d'env (secrets) des conteneurs.
+
+### Bonnes pratiques de déploiement
+
+- TLS en frontal, Vault pour les secrets, rôle DB en lecture seule dédié.
+- Ne jamais exposer l'admin sans `ADMIN_KEY`.
+- Surveiller la saturation du pool (Prometheus + alertes).
+
+## Exemples CLI
+
+```bash
+export MCP_GATEWAY_URL="https://mcp-gateway.example.com"
+export MCP_GATEWAY_KEY="sk_prod..."
+
+# GitHub via gateway
+curl -H "Authorization: Bearer $MCP_GATEWAY_KEY" \
+  "$MCP_GATEWAY_URL/v1/github/repos/<owner>/<repo>"
+
+# Postgres (SELECT only)
+curl -X POST "$MCP_GATEWAY_URL/v1/postgres/query" \
+  -H "Content-Type: application/json" \
+  -d '{"sql":"SELECT 1 AS ok"}'
+```
+
+Config Claude Code (exemple) :
+
+```json
+{ "mcp": { "gateway": "https://mcp-gateway.example.com", "api_key": "sk_prod..." } }
+```
+
+## Ajouter un connecteur
+
+1. Ajouter une entrée dans `servers.yaml` (`id`, `type`, `handler` ou `url` si `remote`).
+2. Pour un builtin : créer un module dans `src/handlers/` et monter la route dans `src/main.py`.
+3. Redémarrer le service.
+4. Ajouter un test et documenter l'endpoint.
+
+## Roadmap
+
+- [ ] Auth appliquée à tous les handlers (router-level dependency)
+- [ ] Confinement filesystem + correctif import `Response`
+- [ ] Auth avancée : OAuth2, mTLS, RBAC
+- [ ] Tests unitaires + couverture CI
+- [ ] Versions épinglées dans `requirements.txt`
+- [ ] Plugin loader réel (actuellement stub)
+- [ ] Proxy WebSocket CDP complet (Chrome DevTools)
+- [ ] UI d'administration
+
+## Contribution
+
+Fork → branche `feature/*` → PR. Ajouter des tests pour tout nouveau handler.
+
+## Licence
+
+[MIT](./LICENSE).

@@ -4,6 +4,7 @@ import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from psycopg2.pool import ThreadedConnectionPool
+from ..sql_guard import validate_select
 
 router = APIRouter()
 
@@ -35,13 +36,15 @@ def get_pool(dsn: str):
 
 
 def _run_query(dsn: str, sql: str, params: list | None = None):
-    # Safety: only allow SELECT queries in MVP
-    if not sql.strip().lower().startswith('select'):
-        raise ValueError('Only SELECT queries are allowed in MVP')
+    # App-level guard (clean 400 + no statement stacking).
+    sql = validate_select(sql)
     pool = get_pool(dsn)
     conn = pool.getconn()
     try:
+        conn.autocommit = False
         cur = conn.cursor(cursor_factory=RealDictCursor)
+        # Authoritative write guard: any write inside this tx is rejected by PG.
+        cur.execute("SET TRANSACTION READ ONLY")
         # enforce statement timeout (ms)
         try:
             cur.execute(f"SET LOCAL statement_timeout = {int(PG_STATEMENT_TIMEOUT_MS)}")
@@ -55,7 +58,14 @@ def _run_query(dsn: str, sql: str, params: list | None = None):
         if len(rows) > PG_MAX_ROWS:
             rows = rows[:PG_MAX_ROWS]
             truncated = True
+        conn.rollback()
         return {'columns': cols, 'rows': rows, 'truncated': truncated}
+    except Exception:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        raise
     finally:
         pool.putconn(conn)
 

@@ -28,14 +28,13 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+          if [ -f requirements-dev.txt ]; then
+            pip install -r requirements-dev.txt
+          elif [ -f requirements.txt ]; then
+            pip install -r requirements.txt
+          fi
       - name: Syntax check
         run: |
           python -m compileall .
-      - name: Run tests if present
-        run: |
-          if [ -f pytest.ini ] || [ -d tests ] || ls test_*.py 1>/dev/null 2>/dev/null; then
-            pytest -q
-          else
-            echo "No tests to run"
-          fi
+      - name: Run tests
+        run: pytest -q

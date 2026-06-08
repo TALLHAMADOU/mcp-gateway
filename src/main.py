@@ -2,14 +2,13 @@ from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse, Response
 import os, yaml, httpx
 from .auth import require_api_key
-from .handlers.fs import router as fs_router
 
 ROOT = os.getcwd()
 CONFIG_PATH = os.path.join(ROOT, 'servers.yaml')
 
 app = FastAPI(title='MCP Gateway')
 
-# include builtin handlers under /v1
+# include builtin handlers under /v1 (all protected by the gateway API key)
 from .handlers.fs import router as fs_router
 from .handlers.inkscape import router as inkscape_router
 from .handlers.gimp import router as gimp_router
@@ -25,20 +24,22 @@ from .handlers.chrome_devtools import router as chrome_router
 from .handlers.notion import router as notion_router
 from .handlers.postgres import router as postgres_router
 
-app.include_router(fs_router, prefix='/v1/fs')
-app.include_router(inkscape_router, prefix='/v1/inkscape')
-app.include_router(gimp_router, prefix='/v1/gimp')
-app.include_router(krita_router, prefix='/v1/krita')
-app.include_router(synfig_router, prefix='/v1/synfig')
-app.include_router(blender_router, prefix='/v1/blender')
-app.include_router(figma_router, prefix='/v1/figma')
-app.include_router(google_stitch_router, prefix='/v1/google-stitch')
-app.include_router(github_router, prefix='/v1/github')
-app.include_router(db_router, prefix='/v1/db')
-app.include_router(docker_router, prefix='/v1/docker')
-app.include_router(chrome_router, prefix='/v1/chrome')
-app.include_router(notion_router, prefix='/v1/notion')
-app.include_router(postgres_router, prefix='/v1/postgres')
+_AUTH = [Depends(require_api_key)]
+
+app.include_router(fs_router, prefix='/v1/fs', dependencies=_AUTH)
+app.include_router(inkscape_router, prefix='/v1/inkscape', dependencies=_AUTH)
+app.include_router(gimp_router, prefix='/v1/gimp', dependencies=_AUTH)
+app.include_router(krita_router, prefix='/v1/krita', dependencies=_AUTH)
+app.include_router(synfig_router, prefix='/v1/synfig', dependencies=_AUTH)
+app.include_router(blender_router, prefix='/v1/blender', dependencies=_AUTH)
+app.include_router(figma_router, prefix='/v1/figma', dependencies=_AUTH)
+app.include_router(google_stitch_router, prefix='/v1/google-stitch', dependencies=_AUTH)
+app.include_router(github_router, prefix='/v1/github', dependencies=_AUTH)
+app.include_router(db_router, prefix='/v1/db', dependencies=_AUTH)
+app.include_router(docker_router, prefix='/v1/docker', dependencies=_AUTH)
+app.include_router(chrome_router, prefix='/v1/chrome', dependencies=_AUTH)
+app.include_router(notion_router, prefix='/v1/notion', dependencies=_AUTH)
+app.include_router(postgres_router, prefix='/v1/postgres', dependencies=_AUTH)
 
 
 def load_config():
@@ -92,7 +93,10 @@ async def proxy(connector_id: str, path: str, request: Request, api_key: str = D
     if connector.get('type') == 'remote' and connector.get('url'):
         target = connector['url'].rstrip('/') + '/' + path
         async with httpx.AsyncClient() as client:
-            req_headers = {k: v for k, v in request.headers.items() if k.lower() != 'host'}
+            # Strip hop-by-hop and gateway-auth headers so the gateway API key
+            # and Host are never leaked to the upstream connector.
+            _STRIP = {'host', 'authorization', 'content-length', 'connection'}
+            req_headers = {k: v for k, v in request.headers.items() if k.lower() not in _STRIP}
             body = await request.body()
             resp = await client.request(request.method, target, headers=req_headers, content=body)
             return Response(content=resp.content, status_code=resp.status_code, headers=dict(resp.headers))
