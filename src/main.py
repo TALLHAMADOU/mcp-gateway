@@ -119,6 +119,10 @@ async def proxy(connector_id: str, path: str, request: Request, api_key: str = D
             req_headers = {k: v for k, v in request.headers.items() if k.lower() not in _STRIP}
             body = await request.body()
             resp = await client.request(request.method, target, headers=req_headers, content=body)
-            return Response(content=resp.content, status_code=resp.status_code, headers=dict(resp.headers))
+            # httpx already decoded the body, so drop length/encoding headers that
+            # would otherwise describe the original (compressed/chunked) stream.
+            _DROP = {'content-encoding', 'content-length', 'transfer-encoding', 'connection'}
+            resp_headers = {k: v for k, v in resp.headers.items() if k.lower() not in _DROP}
+            return Response(content=resp.content, status_code=resp.status_code, headers=resp_headers)
 
     return JSONResponse({'error': 'connector type not supported by proxy'}, status_code=400)

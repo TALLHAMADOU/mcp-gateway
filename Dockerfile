@@ -3,13 +3,17 @@ FROM python:3.11-slim
 # Minimal build for MCP Gateway
 WORKDIR /app
 
-# system deps for psycopg2 and docker SDK
+# system deps for psycopg2, docker SDK, and LibreOffice headless
+# (libreoffice-* is needed by the office_convert tool, e.g. export to PDF)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libpq-dev \
     gcc \
     libffi-dev \
     git \
+    libreoffice-writer \
+    libreoffice-calc \
+    libreoffice-impress \
   && rm -rf /var/lib/apt/lists/*
 
 # copy requirements first to leverage layer caching
