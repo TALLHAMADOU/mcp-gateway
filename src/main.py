@@ -7,6 +7,11 @@ from .mcp_server import mcp, build_mcp_asgi
 from .middleware import RateLimitMiddleware
 from .plugin_registry import load_plugins, list_plugins, get_plugin, unload_plugin
 from .dashboard import dashboard_router
+from .health import health_router
+from .logging_config import setup_json_logging
+
+# Setup JSON logging if LOG_JSON env var is set
+setup_json_logging()
 
 # basic logging & audit logger
 logging.basicConfig(level=logging.INFO)
@@ -112,6 +117,9 @@ app.include_router(ms_graph_router, prefix='/v1/ms-graph', dependencies=_AUTH)
 
 # Dashboard (no auth required for now, but could add)
 app.include_router(dashboard_router, prefix='/dashboard')
+
+# Health checks (no auth required - needed by load balancers/k8s)
+app.include_router(health_router)
 
 
 def load_config():
