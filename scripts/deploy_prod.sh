@@ -20,6 +20,13 @@ vault kv get -format=json "$VAULT_PATH" | jq -r '.data.data | to_entries[] | "\(
 
 echo ".env.production created (ensure it's in .gitignore)."
 
+# Ensure REDIS_URL is present; if not, provide a sensible default for the compose
+if ! grep -q '^REDIS_URL=' .env.production; then
+  echo "REDIS_URL not found in .env.production — adding default 'redis://redis:6379' (suitable for the bundled docker-compose)."
+  echo "REDIS_URL=redis://redis:6379" >> .env.production
+fi
+
+
 echo "Starting services via docker-compose.prod.yml"
 docker-compose -f docker-compose.prod.yml up -d --build
 
