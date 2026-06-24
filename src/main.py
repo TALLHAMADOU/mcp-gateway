@@ -5,6 +5,7 @@ import os, yaml, httpx, tempfile, logging, urllib.parse, socket, ipaddress, hmac
 from .auth import require_api_key, API_KEY
 from .mcp_server import mcp, build_mcp_asgi
 from .middleware import RateLimitMiddleware
+from .plugin_registry import load_plugins, list_plugins, get_plugin, unload_plugin
 
 # basic logging & audit logger
 logging.basicConfig(level=logging.INFO)
@@ -49,6 +50,13 @@ CONFIG_PATH = os.path.join(ROOT, 'servers.yaml')
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Load plugins at startup
+    try:
+        load_plugins()
+        logging.info("Plugins loaded successfully")
+    except Exception as e:
+        logging.error(f"Failed to load plugins: {e}")
+    
     # Run the MCP streamable-HTTP session manager for the mounted /mcp app.
     async with mcp.session_manager.run():
         yield
@@ -233,3 +241,63 @@ async def proxy(connector_id: str, path: str, request: Request, api_key: str = D
             return Response(content=resp.content, status_code=resp.status_code, headers=resp_headers)
 
     return JSONResponse({'error': 'connector type not supported by proxy'}, status_code=400)
+
+
+# ==================== PLUGIN SYSTEM ====================
+
+@app.get('/v1/plugins')
+async def list_all_plugins(api_key: str = Depends(require_api_key)):
+    """List all loaded plugins with metadata."""
+    plugins = list_plugins()
+    return {
+        "count": len(plugins),
+        "plugins": plugins
+    }
+
+
+@app.post('/v1/plugins/{plugin_id}/execute')
+async def execute_plugin(plugin_id: str, payload: dict, request: Request, api_key: str = Depends(require_api_key)):
+    """Execute a plugin tool with the given arguments."""
+    tool = get_plugin(plugin_id)
+    if not tool:
+        raise HTTPException(status_code=404, detail=f"Plugin not found: {plugin_id}")
+    
+    try:
+        # Audit plugin execution
+        try:
+            masked = f"{str(api_key)[:4]}..." if api_key else 'unknown'
+            audit_logger.info('plugin.execute', extra={'actor': masked, 'plugin_id': plugin_id})
+        except Exception:
+            pass
+        
+        # Execute the plugin function
+        result = await tool.call(**payload)
+        return {
+            "plugin_id": plugin_id,
+            "success": True,
+            "result": result
+        }
+    except TypeError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid arguments: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Plugin execution failed: {str(e)}")
+
+
+@app.delete('/v1/plugins/{plugin_id}')
+async def delete_plugin(plugin_id: str, api_key: str = Depends(require_api_key), x_admin_key: typing.Optional[str] = Header(None, alias='X-Admin-Key')):
+    """Unload a plugin (requires admin key)."""
+    # Only allow deletion if ADMIN_KEY is configured
+    if not ADMIN_KEY:
+        raise HTTPException(status_code=403, detail='Admin key not configured')
+    
+    admin_token = x_admin_key
+    if not admin_token:
+        raise HTTPException(status_code=401, detail='Missing X-Admin-Key header')
+    
+    if not hmac.compare_digest(admin_token, ADMIN_KEY):
+        raise HTTPException(status_code=403, detail='Invalid admin key')
+    
+    if unload_plugin(plugin_id):
+        return {"ok": True, "message": f"Plugin {plugin_id} unloaded"}
+    else:
+        raise HTTPException(status_code=404, detail=f"Plugin not found: {plugin_id}")
