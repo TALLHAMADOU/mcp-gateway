@@ -26,6 +26,7 @@ from .handlers import office as office_handler
 from .handlers import google_workspace as gws
 from .handlers import ms_graph as msg
 from .sql_guard import validate_select
+from .plugin_registry import list_plugins
 
 mcp = FastMCP("MCP Gateway")
 # Stateless keeps mounting simple; serve the endpoint at the mount root so the
@@ -253,6 +254,17 @@ async def msexcel_worksheets(item_id: str) -> dict:
 async def msexcel_range(item_id: str, name: str) -> dict:
     """Read the used range of a worksheet in an Excel workbook on OneDrive."""
     return await msg.excel_used_range(item_id, name)
+
+
+# --- Plugins (dynamically loaded) -----------------------------------------------
+@mcp.tool()
+def list_plugins_tool() -> dict:
+    """List all available plugins with their schemas."""
+    plugins = list_plugins()
+    return {
+        "count": len(plugins),
+        "plugins": plugins
+    }
 
 
 # --- ASGI auth wrapper for the mounted MCP app ------------------------------
