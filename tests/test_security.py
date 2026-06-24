@@ -26,7 +26,8 @@ def test_admin_register_rejects_private_url(monkeypatch):
     # Make ADMIN_KEY equal to API key so the same Authorization header satisfies both
     monkeypatch.setenv('ADMIN_KEY', KEY)
     payload = {'id': 'tmp-1', 'type': 'remote', 'url': 'https://127.0.0.1/some'}
-    r = client.post('/v1/admin/register', headers=AUTH, json=payload)
+    headers = {**AUTH, 'X-Admin-Key': KEY}
+    r = client.post('/v1/admin/register', headers=headers, json=payload)
     assert r.status_code == 403
 
 

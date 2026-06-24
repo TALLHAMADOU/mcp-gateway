@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse, Response
-import os, yaml, httpx, tempfile, logging, urllib.parse, socket, ipaddress
+import os, yaml, httpx, tempfile, logging, urllib.parse, socket, ipaddress, hmac
 from .auth import require_api_key, API_KEY
 from .mcp_server import mcp, build_mcp_asgi
 from .middleware import RateLimitMiddleware
@@ -108,16 +108,21 @@ from fastapi import Header
 ADMIN_KEY = os.environ.get('ADMIN_KEY')
 
 @app.post('/v1/admin/register')
-async def register_connector(payload: dict, request: Request, api_key: str = Depends(require_api_key), authorization: typing.Optional[str] = Header(None)):
+async def register_connector(payload: dict, request: Request, api_key: str = Depends(require_api_key), authorization: typing.Optional[str] = Header(None), x_admin_key: typing.Optional[str] = Header(None, alias='X-Admin-Key')):
     # Only allow registration if ADMIN_KEY is configured
     if not ADMIN_KEY:
         raise HTTPException(status_code=403, detail='Admin registration disabled: ADMIN_KEY not configured')
 
-    # Require admin authorization header and validate it
-    if not authorization:
-        raise HTTPException(status_code=401, detail='Missing Authorization header for admin')
-    token = authorization.split(' ', 1)[1] if authorization.lower().startswith('bearer ') else authorization
-    if token != ADMIN_KEY:
+    # Accept X-Admin-Key header preferentially, fall back to Authorization for backward compatibility
+    admin_token = None
+    if x_admin_key:
+        admin_token = x_admin_key
+    elif authorization:
+        admin_token = authorization.split(' ', 1)[1] if authorization.lower().startswith('bearer ') else authorization
+    if not admin_token:
+        raise HTTPException(status_code=401, detail='Missing admin authorization header')
+    # constant-time compare
+    if not hmac.compare_digest(admin_token, ADMIN_KEY):
         raise HTTPException(status_code=403, detail='Invalid admin key')
 
     # validate payload
