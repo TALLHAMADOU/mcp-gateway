@@ -6,6 +6,7 @@ from .auth import require_api_key, API_KEY
 from .mcp_server import mcp, build_mcp_asgi
 from .middleware import RateLimitMiddleware
 from .plugin_registry import load_plugins, list_plugins, get_plugin, unload_plugin
+from .dashboard import dashboard_router
 
 # basic logging & audit logger
 logging.basicConfig(level=logging.INFO)
@@ -108,6 +109,9 @@ app.include_router(postgres_router, prefix='/v1/postgres', dependencies=_AUTH)
 app.include_router(office_router, prefix='/v1/office', dependencies=_AUTH)
 app.include_router(gworkspace_router, prefix='/v1/google-workspace', dependencies=_AUTH)
 app.include_router(ms_graph_router, prefix='/v1/ms-graph', dependencies=_AUTH)
+
+# Dashboard (no auth required for now, but could add)
+app.include_router(dashboard_router, prefix='/dashboard')
 
 
 def load_config():
