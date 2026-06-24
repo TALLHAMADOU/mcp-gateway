@@ -1,9 +1,14 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse, Response
-import os, yaml, httpx, tempfile
+import os, yaml, httpx, tempfile, logging
 from .auth import require_api_key, API_KEY
 from .mcp_server import mcp, build_mcp_asgi
+from .middleware import RateLimitMiddleware
+
+# basic logging & audit logger
+logging.basicConfig(level=logging.INFO)
+audit_logger = logging.getLogger('mcp_audit')
 
 ROOT = os.getcwd()
 CONFIG_PATH = os.path.join(ROOT, 'servers.yaml')
@@ -17,6 +22,8 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title='MCP Gateway', lifespan=lifespan)
+# attach rate limiting middleware (in-memory token buckets)
+app.add_middleware(RateLimitMiddleware)
 
 # Native MCP endpoint (Option B): AI assistants connect here over streamable
 # HTTP, authenticated with the same gateway API key.
@@ -120,6 +127,13 @@ async def register_connector(payload: dict, request: Request, api_key: str = Dep
         except Exception:
             pass
 
+    # audit log
+    try:
+        masked = f"{str(api_key)[:4]}..." if api_key else 'unknown'
+        audit_logger.info('admin.register', extra={'actor': masked, 'connector_id': payload.get('id'), 'url': payload.get('url')})
+    except Exception:
+        pass
+
     return {'ok': True, 'connector': payload}
 
 
@@ -132,6 +146,12 @@ async def proxy(connector_id: str, path: str, request: Request, api_key: str = D
 
     if connector.get('type') == 'remote' and connector.get('url'):
         target = connector['url'].rstrip('/') + '/' + path
+        # Audit proxy usage
+        try:
+            masked = f"{str(api_key)[:4]}..." if api_key else 'unknown'
+            audit_logger.info('proxy.request', extra={'actor': masked, 'connector_id': connector_id, 'target': target, 'method': request.method})
+        except Exception:
+            pass
         async with httpx.AsyncClient() as client:
             # Strip hop-by-hop and gateway-auth headers so the gateway API key
             # and Host are never leaked to the upstream connector.

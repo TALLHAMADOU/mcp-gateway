@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from starlette.concurrency import run_in_threadpool
 import docker
+import copy
 
 router = APIRouter()
 
@@ -11,18 +12,42 @@ async def health():
 def _docker_client():
     return docker.from_env()
 
+def _sanitize_container(attrs: dict) -> dict:
+    # Return a copy with sensitive fields removed (env, host config)
+    a = copy.deepcopy(attrs)
+    # Remove environment variables
+    try:
+        if 'Config' in a and isinstance(a['Config'], dict):
+            a['Config'].pop('Env', None)
+            # keep other config fields
+    except Exception:
+        pass
+    # Remove HostConfig which may contain mounts/ binds with secrets
+    a.pop('HostConfig', None)
+    return a
+
 def _ps():
     client = _docker_client()
-    return [c.attrs for c in client.containers.list(all=True)]
+    return [_sanitize_container(c.attrs) for c in client.containers.list(all=True)]
 
 def _images():
     client = _docker_client()
-    return [i.attrs for i in client.images.list()]
+    # images.attrs may contain container config; scrub if present
+    res = []
+    for i in client.images.list():
+        try:
+            a = copy.deepcopy(i.attrs)
+            if 'ContainerConfig' in a and isinstance(a['ContainerConfig'], dict):
+                a['ContainerConfig'].pop('Env', None)
+            res.append(a)
+        except Exception:
+            res.append({})
+    return res
 
 def _inspect(id_or_name: str):
     client = _docker_client()
     c = client.containers.get(id_or_name)
-    return c.attrs
+    return _sanitize_container(c.attrs)
 
 @router.get('/ps')
 async def ps():

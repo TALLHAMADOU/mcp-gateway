@@ -337,8 +337,17 @@ export VAULT_ADDR=...; export VAULT_TOKEN=...
 | 4 | Garde SQL durcie (`sql_guard`) + transaction PG `READ ONLY` + SQLite `mode=ro` | ✅ |
 | 5 | Dépendances épinglées (`requirements.txt`) | ✅ |
 | 6 | Tests `pytest` exécutés en CI | ✅ |
-| 7 | MCP `/mcp` protégé par middleware ASGI (`BearerAuthASGI`) | ✅ |
-| 8 | `docker_inspect` expose la config (dont env) des conteneurs | ⚠️ par design — réserver aux environnements de confiance |
+| 7 | MCP `/mcp` protégé par middleware ASGI (`BearerAuthASGI`) et vérification constante du token | ✅ |
+| 8 | `docker_inspect` now scrubs environment variables and HostConfig to avoid leaking container secrets | ✅ (sanitized)
+| 9 | Rate-limiting middleware (in-memory token buckets) protects `/mcp` and `/v1/*` against abusive clients | ✅ (in-memory)
+| 10 | Audit logging added for admin registrations and proxy requests (`mcp_audit` logger) | ✅ |
+
+**Notes & recommendations** :
+
+- MCP_GATEWAY_KEY is now required (no default). Ensure the env var is set in production; do not commit keys.
+- `POST /v1/admin/register` is disabled unless `ADMIN_KEY` is configured. Admin actions are audited.
+- `servers.yaml` is written atomically to avoid races; remote connector URLs must use `https://`.
+- The rate-limiter implemented here is in-memory and not suitable for distributed deployments — use an API gateway or Redis-backed limiter for scaled environments.
 
 **Bonnes pratiques** : TLS en frontal, Vault pour les secrets, ne jamais exposer l'admin sans `ADMIN_KEY`, surveiller le pool DB.
 
