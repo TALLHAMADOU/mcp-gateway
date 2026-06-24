@@ -1,72 +1,75 @@
 connectors:
-  - id: fs_local
-    type: builtin_fs
-    description: Local filesystem access (built-in)
-  - id: git_remote
-    type: remote
-    url: http://gitea:3000
-    description: Example remote git MCP (gitea service)
-  - id: inkscape_local
-    type: builtin
-    handler: inkscape
-    description: Inkscape local helper (suggested commands)
-  - id: gimp_local
-    type: builtin
-    handler: gimp
-    description: GIMP local helper
-  - id: krita_local
-    type: builtin
-    handler: krita
-    description: Krita local helper
-  - id: synfig_local
-    type: builtin
-    handler: synfig
-    description: Synfig local helper
-  - id: blender_local
-    type: builtin
-    handler: blender
-    description: Blender local helper
-  - id: figma_local
-    type: builtin
-    handler: figma
-    description: Figma API proxy (requires FIGMA_TOKEN)
-  - id: google_stitch
-    type: builtin
-    handler: google_stitch
-    description: Placeholder for Google Stitch (clarify)
-  - id: github
-    type: builtin
-    handler: github
-    description: GitHub API proxy (requires GITHUB_TOKEN)
-  - id: db_sqlite
-    type: builtin
-    handler: db
-    description: SQLite query connector (local)
-  - id: docker_local
-    type: builtin
-    handler: docker
-    description: Docker daemon access (requires docker socket)
-  - id: chrome_devtools
-    type: builtin
-    handler: chrome_devtools
-    description: Chrome DevTools target listing (requires Chrome with --remote-debugging-port=9222)
-  - id: notion
-    type: builtin
-    handler: notion
-    description: Notion API proxy (requires NOTION_TOKEN)
-  - id: postgres
-    type: builtin
-    handler: postgres
-    description: PostgreSQL read-only connector (uses POSTGRES_DSN or DATABASE_URL env)
-  - id: office_local
-    type: builtin
-    handler: office
-    description: Local DOCX/XLSX/PPTX generation + LibreOffice headless conversion
-  - id: google_workspace
-    type: builtin
-    handler: google_workspace
-    description: Google Workspace (Drive/Docs/Sheets/Slides) - requires GOOGLE_ACCESS_TOKEN
-  - id: ms_graph
-    type: builtin
-    handler: ms_graph
-    description: Microsoft 365 via Graph (OneDrive/Word/Excel/PPT) - requires MS_GRAPH_TOKEN
+- description: Local filesystem access (built-in)
+  id: fs_local
+  type: builtin_fs
+- description: Example remote git MCP (gitea service)
+  id: git_remote
+  type: remote
+  url: http://gitea:3000
+- description: Inkscape local helper (suggested commands)
+  handler: inkscape
+  id: inkscape_local
+  type: builtin
+- description: GIMP local helper
+  handler: gimp
+  id: gimp_local
+  type: builtin
+- description: Krita local helper
+  handler: krita
+  id: krita_local
+  type: builtin
+- description: Synfig local helper
+  handler: synfig
+  id: synfig_local
+  type: builtin
+- description: Blender local helper
+  handler: blender
+  id: blender_local
+  type: builtin
+- description: Figma API proxy (requires FIGMA_TOKEN)
+  handler: figma
+  id: figma_local
+  type: builtin
+- description: Placeholder for Google Stitch (clarify)
+  handler: google_stitch
+  id: google_stitch
+  type: builtin
+- description: GitHub API proxy (requires GITHUB_TOKEN)
+  handler: github
+  id: github
+  type: builtin
+- description: SQLite query connector (local)
+  handler: db
+  id: db_sqlite
+  type: builtin
+- description: Docker daemon access (requires docker socket)
+  handler: docker
+  id: docker_local
+  type: builtin
+- description: Chrome DevTools target listing (requires Chrome with --remote-debugging-port=9222)
+  handler: chrome_devtools
+  id: chrome_devtools
+  type: builtin
+- description: Notion API proxy (requires NOTION_TOKEN)
+  handler: notion
+  id: notion
+  type: builtin
+- description: PostgreSQL read-only connector (uses POSTGRES_DSN or DATABASE_URL env)
+  handler: postgres
+  id: postgres
+  type: builtin
+- description: Local DOCX/XLSX/PPTX generation + LibreOffice headless conversion
+  handler: office
+  id: office_local
+  type: builtin
+- description: Google Workspace (Drive/Docs/Sheets/Slides) - requires GOOGLE_ACCESS_TOKEN
+  handler: google_workspace
+  id: google_workspace
+  type: builtin
+- description: Microsoft 365 via Graph (OneDrive/Word/Excel/PPT) - requires MS_GRAPH_TOKEN
+  handler: ms_graph
+  id: ms_graph
+  type: builtin
+- id: example-remote
+  type: remote
+  url: https://example.com/mcp

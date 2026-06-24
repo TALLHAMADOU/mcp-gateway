@@ -13,6 +13,7 @@ services:
     restart: unless-stopped
     depends_on:
       - postgres
+      - redis
 
   postgres:
     image: postgres:15
@@ -26,8 +27,16 @@ services:
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: mcp
 
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+    # Do not expose Redis to the public internet; keep it on the internal network.
+
 volumes:
   pgdata: {}
+  redisdata: {}
 
 networks:
   default:
@@ -35,4 +44,4 @@ networks:
 
 # Notes:
 # - Do NOT commit .env.production. Use Vault to provision it before running.
-# - The gateway reads secrets from env (POSTGRES_DSN, GITHUB_TOKEN, NOTION_TOKEN, MCP_GATEWAY_KEY, etc.)
+# - The gateway reads secrets from env (POSTGRES_DSN, GITHUB_TOKEN, NOTION_TOKEN, MCP_GATEWAY_KEY, REDIS_URL, etc.)

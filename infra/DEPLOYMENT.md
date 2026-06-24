@@ -2,7 +2,7 @@ Deployment notes for MCP Gateway (production)
 
 Prerequisites
 - Vault with secrets stored at secret/data/mcp-gateway (KV v2) or equivalent secret store.
-- A Redis instance (recommended) for production rate-limiting (set REDIS_URL).
+- A Redis instance (recommended) for production rate-limiting (set REDIS_URL). The provided docker-compose includes a Redis service for small deployments.
 - TLS termination (nginx/Traefik) in front of the gateway.
 - Docker runtime on host if using containerized LibreOffice (optional), and the gateway image must have access to the docker socket if container-runner is used.
 
@@ -11,7 +11,7 @@ Required environment variables (Vault-backed)
 - ADMIN_KEY: Admin key to enable /v1/admin/register (required to allow runtime connector registration).
 
 Recommended environment variables
-- REDIS_URL: redis://... (for distributed rate-limiting).
+- REDIS_URL: redis://... (for distributed rate-limiting). When deploying with the included docker-compose.prod.yml the default is redis://redis:6379 and deploy script will inject it if missing.
 - POSTGRES_DSN / DATABASE_URL: Postgres connection (read-only role recommended).
 - FS_ROOT: Root directory for filesystem sandbox.
 - OFFICE_USE_CONTAINER=1: Enable containerized LibreOffice if you want conversions isolated.

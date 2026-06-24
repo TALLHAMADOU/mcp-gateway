@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse, Response
-import os, yaml, httpx, tempfile, logging, urllib.parse, socket, ipaddress
+import os, yaml, httpx, tempfile, logging, urllib.parse, socket, ipaddress, hmac
 from .auth import require_api_key, API_KEY
 from .mcp_server import mcp, build_mcp_asgi
 from .middleware import RateLimitMiddleware
@@ -9,6 +9,17 @@ from .middleware import RateLimitMiddleware
 # basic logging & audit logger
 logging.basicConfig(level=logging.INFO)
 audit_logger = logging.getLogger('mcp_audit')
+
+# metrics
+try:
+    from .metrics import metrics_response, request_counter, auth_failures, rate_limit_hits, proxy_errors, request_latency
+except Exception:
+    metrics_response = None
+    request_counter = None
+    auth_failures = None
+    rate_limit_hits = None
+    proxy_errors = None
+    request_latency = None
 
 # SSRF / upstream URL validation: reject private/local addresses
 
@@ -99,7 +110,17 @@ def load_config():
 @app.get('/v1/connectors')
 async def list_connectors(api_key: str = Depends(require_api_key)):
     cfg = load_config()
+    if request_latency:
+        with request_latency.time():
+            return cfg.get('connectors', [])
     return cfg.get('connectors', [])
+
+
+# prometheus metrics endpoint
+if metrics_response:
+    @app.get('/metrics')
+    async def metrics():
+        return metrics_response()
 
 
 import typing
@@ -108,16 +129,27 @@ from fastapi import Header
 ADMIN_KEY = os.environ.get('ADMIN_KEY')
 
 @app.post('/v1/admin/register')
-async def register_connector(payload: dict, request: Request, api_key: str = Depends(require_api_key), authorization: typing.Optional[str] = Header(None)):
+async def register_connector(payload: dict, request: Request, api_key: str = Depends(require_api_key), authorization: typing.Optional[str] = Header(None), x_admin_key: typing.Optional[str] = Header(None, alias='X-Admin-Key')):
+    # increment request counter
+    if request_counter:
+        try:
+            request_counter.labels(method='POST', path='/v1/admin/register', status='in_progress').inc()
+        except Exception:
+            pass
     # Only allow registration if ADMIN_KEY is configured
     if not ADMIN_KEY:
         raise HTTPException(status_code=403, detail='Admin registration disabled: ADMIN_KEY not configured')
 
-    # Require admin authorization header and validate it
-    if not authorization:
-        raise HTTPException(status_code=401, detail='Missing Authorization header for admin')
-    token = authorization.split(' ', 1)[1] if authorization.lower().startswith('bearer ') else authorization
-    if token != ADMIN_KEY:
+    # Accept X-Admin-Key header preferentially, fall back to Authorization for backward compatibility
+    admin_token = None
+    if x_admin_key:
+        admin_token = x_admin_key
+    elif authorization:
+        admin_token = authorization.split(' ', 1)[1] if authorization.lower().startswith('bearer ') else authorization
+    if not admin_token:
+        raise HTTPException(status_code=401, detail='Missing admin authorization header')
+    # constant-time compare
+    if not hmac.compare_digest(admin_token, ADMIN_KEY):
         raise HTTPException(status_code=403, detail='Invalid admin key')
 
     # validate payload
@@ -158,6 +190,13 @@ async def register_connector(payload: dict, request: Request, api_key: str = Dep
         audit_logger.info('admin.register', extra={'actor': masked, 'connector_id': payload.get('id'), 'url': payload.get('url')})
     except Exception:
         pass
+
+    # increment request counter success
+    if request_counter:
+        try:
+            request_counter.labels(method='POST', path='/v1/admin/register', status='200').inc()
+        except Exception:
+            pass
 
     return {'ok': True, 'connector': payload}
 

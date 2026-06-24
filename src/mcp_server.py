@@ -50,6 +50,16 @@ def fs_list(path: str = ".") -> dict:
     target = fs_handler._resolve(path)
     if not os.path.isdir(target):
         raise ValueError("not a directory")
+    try:
+        from .metrics import request_counter, request_latency
+        if request_latency:
+            with request_latency.time():
+                return {"path": path, "entries": [
+                    {"name": n, "is_dir": os.path.isdir(os.path.join(target, n))}
+                    for n in os.listdir(target)
+                ]}
+    except Exception:
+        pass
     return {"path": path, "entries": [
         {"name": n, "is_dir": os.path.isdir(os.path.join(target, n))}
         for n in os.listdir(target)

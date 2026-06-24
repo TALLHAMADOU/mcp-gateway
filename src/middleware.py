@@ -12,6 +12,12 @@ try:
 except Exception:
     aioredis = None
 
+# metrics (prometheus)
+try:
+    from .metrics import rate_limit_hits
+except Exception:
+    rate_limit_hits = None
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """Rate limiter with Redis-backed fixed-window fallback to in-memory token bucket.
 
@@ -41,13 +47,47 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             key = request.client.host if request.client else 'anon'
 
         if self.use_redis and self.redis:
-            # fixed-window per-minute counter
+            # Redis-backed token-bucket implemented atomically via EVAL (Lua).
             redis_key = f"rl:{key}"
             try:
-                count = await self.redis.incr(redis_key)
-                if count == 1:
-                    await self.redis.expire(redis_key, 60)
-                if count > self.limit:
+                now_ms = int(time.time() * 1000)
+                capacity = int(self.capacity)
+                # rate per millisecond (tokens per ms)
+                rate_per_ms = float(self.rate) / 1000.0
+                lua = r"""
+local key = KEYS[1]
+local capacity = tonumber(ARGV[1])
+local rate = tonumber(ARGV[2])
+local now = tonumber(ARGV[3])
+local requested = tonumber(ARGV[4])
+local data = redis.call('HMGET', key, 'tokens', 'ts')
+local tokens = tonumber(data[1])
+local ts = tonumber(data[2])
+if not tokens or not ts then
+  tokens = capacity
+  ts = now
+end
+local delta = (now - ts)
+local new_tokens = tokens + delta * rate
+if new_tokens > capacity then new_tokens = capacity end
+if new_tokens < requested then
+  redis.call('HMSET', key, 'tokens', new_tokens, 'ts', now)
+  redis.call('PEXPIRE', key, 60000)
+  return 0
+else
+  new_tokens = new_tokens - requested
+  redis.call('HMSET', key, 'tokens', new_tokens, 'ts', now)
+  redis.call('PEXPIRE', key, 60000)
+  return 1
+end
+"""
+                ok = await self.redis.eval(lua, 1, redis_key, str(capacity), str(rate_per_ms), str(now_ms), '1')
+                if int(ok) == 0:
+                    if rate_limit_hits:
+                        try:
+                            rate_limit_hits.inc()
+                        except Exception:
+                            pass
                     return Response(status_code=429, content='Rate limit exceeded')
             except Exception:
                 # On redis errors, fall back to in-memory logic
