@@ -29,6 +29,25 @@
 
 ---
 
+## Developer quickstart
+
+Clone the repo, create a virtualenv, install dev deps and run the tests locally:
+
+```bash
+git clone https://github.com/TALLHAMADOU/mcp-gateway.git
+cd mcp-gateway
+python3 -m venv .venv && . .venv/bin/activate
+export MCP_GATEWAY_KEY=sk_local_example  # dev only; do not commit
+pip install -r requirements-dev.txt
+pytest -q
+```
+
+Notes for contributors:
+- The project provides safe fallbacks for local development: in-memory rate-limiter (no REDIS_URL) and local LibreOffice conversion unless OFFICE_USE_CONTAINER=1 is set.
+- Run pip-audit and bandit locally to reproduce CI scans: `pip install pip-audit bandit && pip-audit && bandit -r src -lll`.
+
+---
+
 ## Le problème
 
 Les assistants IA modernes (Claude Code, Codex, Gemini CLI, GitHub Copilot CLI) parlent le **MCP** (*Model Context Protocol*) pour accéder à des outils externes. Mais sans passerelle, chaque assistant doit :
