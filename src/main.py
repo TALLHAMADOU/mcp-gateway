@@ -9,6 +9,7 @@ from .plugin_registry import load_plugins, list_plugins, get_plugin, unload_plug
 from .dashboard import dashboard_router
 from .health import health_router
 from .logging_config import setup_json_logging
+from .auto_discovery import get_all_tools, generate_tools_json, generate_mcp_registration_script
 
 # Setup JSON logging if LOG_JSON env var is set
 setup_json_logging()
@@ -253,6 +254,61 @@ async def proxy(connector_id: str, path: str, request: Request, api_key: str = D
             return Response(content=resp.content, status_code=resp.status_code, headers=resp_headers)
 
     return JSONResponse({'error': 'connector type not supported by proxy'}, status_code=400)
+
+
+# ==================== AUTO-DISCOVERY (MCP/REST) ====================
+
+@app.get('/v1/auto-discovery/tools')
+async def list_all_tools(api_key: str = Depends(require_api_key)):
+    """List all available tools (REST endpoint)."""
+    return generate_tools_json()
+
+
+@app.get('/v1/auto-discovery/registration')
+async def get_registration_script(api_key: str = Depends(require_api_key)):
+    """Get MCP registration script for Claude Desktop, Cursor, etc."""
+    gateway_url = os.environ.get('GATEWAY_URL', 'http://localhost:8000')
+    script = generate_mcp_registration_script(gateway_url=gateway_url, api_key=api_key)
+    return JSONResponse({"script": script})
+
+
+@app.post('/v1/auto-discovery/register')
+async def save_registration(payload: dict, api_key: str = Depends(require_api_key)):
+    """Save registration configuration (generates config file)."""
+    client_type = payload.get("client_type", "claude-desktop")  # claude-desktop, cursor, copilot-cli
+    gateway_url = payload.get("gateway_url", "http://localhost:8000")
+    
+    # Generate appropriate config based on client type
+    if client_type == "claude-desktop":
+        config = {
+            "mcpServers": {
+                "gateway": {
+                    "url": f"{gateway_url}/mcp",
+                    "env": {
+                        "MCP_GATEWAY_KEY": api_key
+                    }
+                }
+            }
+        }
+    elif client_type == "cursor":
+        config = {
+            "mcpServers": {
+                "gateway": {
+                    "url": f"{gateway_url}/mcp",
+                    "env": {
+                        "MCP_GATEWAY_KEY": api_key
+                    }
+                }
+            }
+        }
+    else:
+        config = {"error": f"Unknown client type: {client_type}"}
+    
+    return {
+        "client_type": client_type,
+        "config": config,
+        "instructions": f"Copy this config to your {client_type} configuration file."
+    }
 
 
 # ==================== PLUGIN SYSTEM ====================

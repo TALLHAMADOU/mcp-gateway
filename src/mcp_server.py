@@ -267,6 +267,14 @@ def list_plugins_tool() -> dict:
     }
 
 
+# --- Auto-Discovery (MCP) ---
+@mcp.tool()
+def list_all_tools_auto_discovery() -> dict:
+    """Discover all available tools in the gateway."""
+    from src.auto_discovery import generate_tools_json
+    return generate_tools_json()
+
+
 # --- ASGI auth wrapper for the mounted MCP app ------------------------------
 class BearerAuthASGI:
     """Guards the mounted MCP ASGI app with the gateway API key."""
