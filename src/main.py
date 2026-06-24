@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse, Response
-import os, yaml, httpx
+import os, yaml, httpx, tempfile
 from .auth import require_api_key, API_KEY
 from .mcp_server import mcp, build_mcp_asgi
 
@@ -80,13 +80,17 @@ ADMIN_KEY = os.environ.get('ADMIN_KEY')
 
 @app.post('/v1/admin/register')
 async def register_connector(payload: dict, request: Request, api_key: str = Depends(require_api_key), authorization: typing.Optional[str] = Header(None)):
-    # Require ADMIN_KEY if set
-    if ADMIN_KEY:
-        if not authorization:
-            raise HTTPException(status_code=401, detail='Missing Authorization header for admin')
-        token = authorization.split(' ', 1)[1] if authorization.lower().startswith('bearer ') else authorization
-        if token != ADMIN_KEY:
-            raise HTTPException(status_code=403, detail='Invalid admin key')
+    # Only allow registration if ADMIN_KEY is configured
+    if not ADMIN_KEY:
+        raise HTTPException(status_code=403, detail='Admin registration disabled: ADMIN_KEY not configured')
+
+    # Require admin authorization header and validate it
+    if not authorization:
+        raise HTTPException(status_code=401, detail='Missing Authorization header for admin')
+    token = authorization.split(' ', 1)[1] if authorization.lower().startswith('bearer ') else authorization
+    if token != ADMIN_KEY:
+        raise HTTPException(status_code=403, detail='Invalid admin key')
+
     # validate payload
     if not isinstance(payload, dict) or 'id' not in payload:
         raise HTTPException(status_code=400, detail='payload must be a dict with at least an "id" field')
@@ -97,9 +101,25 @@ async def register_connector(payload: dict, request: Request, api_key: str = Dep
     # basic shape validation
     if not payload.get('type') and not payload.get('handler') and not payload.get('url'):
         raise HTTPException(status_code=400, detail='connector must include type and handler or url')
+    # enforce https for remote connectors
+    if payload.get('url') and not str(payload.get('url')).startswith('https://'):
+        raise HTTPException(status_code=400, detail='remote connector url must use https://')
+
     cfg.setdefault('connectors', []).append(payload)
-    with open(CONFIG_PATH, 'w') as f:
-        yaml.safe_dump(cfg, f)
+    # atomic write to avoid partial writes / races
+    tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(CONFIG_PATH) or '.')
+    try:
+        with os.fdopen(tmp_fd, 'w') as tmp:
+            yaml.safe_dump(cfg, tmp)
+        os.replace(tmp_path, CONFIG_PATH)
+    finally:
+        # best-effort cleanup
+        try:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+        except Exception:
+            pass
+
     return {'ok': True, 'connector': payload}
 
 

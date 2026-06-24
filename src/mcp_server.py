@@ -10,6 +10,7 @@ Assistants (Claude Code, Codex, Gemini CLI, Copilot CLI) connect to
 import os
 import httpx
 import yaml
+import hmac
 from starlette.concurrency import run_in_threadpool
 from mcp.server.fastmcp import FastMCP
 
@@ -259,7 +260,8 @@ class BearerAuthASGI:
         headers = dict(scope.get("headers") or [])
         raw = headers.get(b"authorization", b"").decode()
         token = raw[7:] if raw[:7].lower() == "bearer " else raw
-        if token != self.api_key:
+        # constant-time comparison to prevent timing attacks
+        if not hmac.compare_digest(token, self.api_key):
             await send({"type": "http.response.start", "status": 401,
                         "headers": [(b"content-type", b"application/json")]})
             await send({"type": "http.response.body",
