@@ -1,7 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse, Response
-import os, yaml, httpx, tempfile, logging
+import os, yaml, httpx, tempfile, logging, urllib.parse, socket, ipaddress
 from .auth import require_api_key, API_KEY
 from .mcp_server import mcp, build_mcp_asgi
 from .middleware import RateLimitMiddleware
@@ -9,6 +9,28 @@ from .middleware import RateLimitMiddleware
 # basic logging & audit logger
 logging.basicConfig(level=logging.INFO)
 audit_logger = logging.getLogger('mcp_audit')
+
+# SSRF / upstream URL validation: reject private/local addresses
+
+def _is_upstream_url_allowed(url: str) -> bool:
+    try:
+        parsed = urllib.parse.urlparse(url)
+        host = parsed.hostname
+        if not host:
+            return False
+        # Resolve host to IPs
+        infos = socket.getaddrinfo(host, None)
+        for fam, _, _, _, sockaddr in infos:
+            ip = sockaddr[0]
+            try:
+                addr = ipaddress.ip_address(ip)
+                if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved or addr.is_unspecified:
+                    return False
+            except Exception:
+                return False
+        return True
+    except Exception:
+        return False
 
 ROOT = os.getcwd()
 CONFIG_PATH = os.path.join(ROOT, 'servers.yaml')
@@ -111,6 +133,9 @@ async def register_connector(payload: dict, request: Request, api_key: str = Dep
     # enforce https for remote connectors
     if payload.get('url') and not str(payload.get('url')).startswith('https://'):
         raise HTTPException(status_code=400, detail='remote connector url must use https://')
+    # SSRF protection: reject private or loopback addresses
+    if payload.get('url') and not _is_upstream_url_allowed(payload.get('url')):
+        raise HTTPException(status_code=403, detail='remote connector url resolves to a forbidden/ private address')
 
     cfg.setdefault('connectors', []).append(payload)
     # atomic write to avoid partial writes / races
@@ -152,6 +177,9 @@ async def proxy(connector_id: str, path: str, request: Request, api_key: str = D
             audit_logger.info('proxy.request', extra={'actor': masked, 'connector_id': connector_id, 'target': target, 'method': request.method})
         except Exception:
             pass
+        # SSRF protection: ensure target resolves to allowed IPs
+        if not _is_upstream_url_allowed(target):
+            raise HTTPException(status_code=403, detail='upstream connector resolves to a forbidden/private address')
         async with httpx.AsyncClient() as client:
             # Strip hop-by-hop and gateway-auth headers so the gateway API key
             # and Host are never leaked to the upstream connector.
