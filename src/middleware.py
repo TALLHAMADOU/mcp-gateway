@@ -12,6 +12,12 @@ try:
 except Exception:
     aioredis = None
 
+# metrics (prometheus)
+try:
+    from .metrics import rate_limit_hits
+except Exception:
+    rate_limit_hits = None
+
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """Rate limiter with Redis-backed fixed-window fallback to in-memory token bucket.
 
@@ -77,6 +83,11 @@ end
 """
                 ok = await self.redis.eval(lua, 1, redis_key, str(capacity), str(rate_per_ms), str(now_ms), '1')
                 if int(ok) == 0:
+                    if rate_limit_hits:
+                        try:
+                            rate_limit_hits.inc()
+                        except Exception:
+                            pass
                     return Response(status_code=429, content='Rate limit exceeded')
             except Exception:
                 # On redis errors, fall back to in-memory logic
