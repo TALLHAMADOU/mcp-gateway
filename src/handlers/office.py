@@ -106,6 +106,16 @@ def convert_file(source_path: str, to: str) -> str:
     src = _resolve(source_path)
     if not os.path.isfile(src):
         raise FileNotFoundError('source file not found')
+    # Optionally run LibreOffice inside an isolated container if configured
+    use_container = os.environ.get('OFFICE_USE_CONTAINER') == '1'
+    if use_container:
+        try:
+            from .container_runner import run_libreoffice_container
+        except Exception:
+            raise RuntimeError('container runner not available')
+        os.makedirs(OUTPUT_DIR, exist_ok=True)
+        return run_libreoffice_container(src, OUTPUT_DIR)
+
     soffice = shutil.which('soffice') or shutil.which('libreoffice')
     if not soffice:
         raise RuntimeError('LibreOffice (soffice) not installed on host')

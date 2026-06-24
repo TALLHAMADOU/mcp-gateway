@@ -33,8 +33,16 @@ jobs:
           elif [ -f requirements.txt ]; then
             pip install -r requirements.txt
           fi
+          # install security scanning tools
+          pip install pip-audit bandit
       - name: Syntax check
         run: |
           python -m compileall .
+      - name: Security scan: pip-audit
+        run: |
+          python -m pip_audit.pip_audit
+      - name: Security scan: bandit
+        run: |
+          bandit -r src -lll || true
       - name: Run tests
         run: pytest -q
