@@ -102,6 +102,7 @@ def main():
     a.add_argument('--url', help='remote connector URL (for type=remote)')
     a.add_argument('--handler', help='handler name (for builtin)')
     a.add_argument('--meta', help='extra yaml metadata (key1=val1,key2=val2)')
+    a.add_argument('--skip-ssrf', action='store_true', help='Skip SSRF / private-host validation (dev only)')
 
     args = p.parse_args()
 
@@ -120,6 +121,7 @@ def main():
         connector = {'id': args.id, 'type': args.type}
         if args.url:
             connector['url'] = args.url
+        skip_ssrf = getattr(args, 'skip_ssrf', False)
         if args.handler:
             connector['handler'] = args.handler
         if args.meta:
@@ -129,7 +131,30 @@ def main():
                     k, v = kv.split('=', 1)
                     meta[k.strip()] = v.strip()
             connector.update(meta)
-        add_connector_local(connector)
+        if skip_ssrf:
+            # bypass SSRF checks (development convenience)
+            def _add_no_check(conn):
+                cfg = {}
+                if os.path.exists(CONFIG_PATH):
+                    with open(CONFIG_PATH, 'r') as f:
+                        cfg = yaml.safe_load(f) or {}
+                cfg.setdefault('connectors', []).append(conn)
+                tmp_fd, tmp_path = tempfile.mkstemp(dir=os.path.dirname(CONFIG_PATH) or '.')
+                try:
+                    with os.fdopen(tmp_fd, 'w') as tmp:
+                        yaml.safe_dump(cfg, tmp)
+                    os.replace(tmp_path, CONFIG_PATH)
+                finally:
+                    try:
+                        if os.path.exists(tmp_path):
+                            os.remove(tmp_path)
+                    except Exception:
+                        pass
+                print(f"Added connector {conn['id']} to {CONFIG_PATH} (ssrf check skipped)")
+            _add_no_check(connector)
+        else:
+            add_connector_local(connector)
+        return
         return
 
     p.print_help()
