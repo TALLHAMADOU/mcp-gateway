@@ -116,8 +116,9 @@ app.include_router(office_router, prefix='/v1/office', dependencies=_AUTH)
 app.include_router(gworkspace_router, prefix='/v1/google-workspace', dependencies=_AUTH)
 app.include_router(ms_graph_router, prefix='/v1/ms-graph', dependencies=_AUTH)
 
-# Dashboard (no auth required for now, but could add)
-app.include_router(dashboard_router, prefix='/dashboard')
+# Dashboard / playground UI — protected by the gateway API key like /v1/*.
+# (Clients must send Authorization: Bearer <MCP_GATEWAY_KEY>.)
+app.include_router(dashboard_router, prefix='/dashboard', dependencies=_AUTH)
 
 # Health checks (no auth required - needed by load balancers/k8s)
 app.include_router(health_router)
