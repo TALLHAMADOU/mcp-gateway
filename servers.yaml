@@ -2,10 +2,13 @@ connectors:
 - description: Local filesystem access (built-in)
   id: fs_local
   type: builtin_fs
-- description: Example remote git MCP (gitea service)
-  id: git_remote
-  type: remote
-  url: http://gitea:3000
+# Example remote connector. Disabled by default: the proxy enforces https://
+# and rejects private/loopback hosts (SSRF guard), so an internal http host
+# like `gitea:3000` would always return 403. Re-enable with a public https URL.
+# - description: Example remote git MCP (must be https + publicly resolvable)
+#   id: git_remote
+#   type: remote
+#   url: https://git.example.com
 - description: Inkscape local helper (suggested commands)
   handler: inkscape
   id: inkscape_local
