@@ -173,6 +173,11 @@ def get_plugin(plugin_id: str) -> Optional[ToolDefinition]:
     return _PLUGIN_REGISTRY.get(plugin_id)
 
 
+def get_all_plugins() -> Dict[str, "ToolDefinition"]:
+    """Return the live registry of plugin_id -> ToolDefinition."""
+    return _PLUGIN_REGISTRY
+
+
 def list_plugins() -> Dict[str, Dict[str, Any]]:
     """List all loaded plugins with metadata."""
     return {

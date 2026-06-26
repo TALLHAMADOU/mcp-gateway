@@ -78,3 +78,14 @@ def test_delete_plugin_with_admin_key(monkeypatch):
                       headers={**AUTH, 'X-Admin-Key': 'admin-secret'})
     assert r.status_code == 200
     plugin_registry.load_plugins()  # restore for other tests
+
+
+# --- plugins exposed as MCP tools (the #1 gap) ------------------------------
+
+def test_plugins_registered_as_mcp_tools():
+    from src import mcp_server
+    plugin_registry.load_plugins()
+    mcp_server.register_plugin_tools()
+    assert 'example_math_add' in mcp_server._registered_plugin_ids
+    # idempotent: a second pass registers nothing new
+    assert mcp_server.register_plugin_tools() == 0

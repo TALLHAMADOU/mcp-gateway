@@ -1,9 +1,10 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse, Response
-import os, yaml, httpx, tempfile, logging, urllib.parse, socket, ipaddress, hmac
+import os, yaml, httpx, tempfile, logging, hmac
 from .auth import require_api_key, API_KEY
-from .mcp_server import mcp, build_mcp_asgi
+from .mcp_server import mcp, build_mcp_asgi, register_plugin_tools
+from .net_guard import is_upstream_url_allowed
 from .middleware import RateLimitMiddleware
 from .plugin_registry import load_plugins, list_plugins, get_plugin, unload_plugin
 from .dashboard import dashboard_router
@@ -29,27 +30,8 @@ except Exception:
     proxy_errors = None
     request_latency = None
 
-# SSRF / upstream URL validation: reject private/local addresses
-
-def _is_upstream_url_allowed(url: str) -> bool:
-    try:
-        parsed = urllib.parse.urlparse(url)
-        host = parsed.hostname
-        if not host:
-            return False
-        # Resolve host to IPs
-        infos = socket.getaddrinfo(host, None)
-        for fam, _, _, _, sockaddr in infos:
-            ip = sockaddr[0]
-            try:
-                addr = ipaddress.ip_address(ip)
-                if addr.is_private or addr.is_loopback or addr.is_link_local or addr.is_reserved or addr.is_unspecified:
-                    return False
-            except Exception:
-                return False
-        return True
-    except Exception:
-        return False
+# SSRF / upstream URL validation lives in net_guard (shared with mcp_server).
+_is_upstream_url_allowed = is_upstream_url_allowed
 
 ROOT = os.getcwd()
 CONFIG_PATH = os.path.join(ROOT, 'servers.yaml')
@@ -57,13 +39,15 @@ CONFIG_PATH = os.path.join(ROOT, 'servers.yaml')
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Load plugins at startup
+    # Load plugins at startup, then expose them as MCP tools so assistants
+    # connected to /mcp can actually call them (not just list them).
     try:
         load_plugins()
-        logging.info("Plugins loaded successfully")
+        n = register_plugin_tools()
+        logging.info(f"Plugins loaded and {n} registered as MCP tools")
     except Exception as e:
-        logging.error(f"Failed to load plugins: {e}")
-    
+        logging.error(f"Failed to load/register plugins: {e}")
+
     # Run the MCP streamable-HTTP session manager for the mounted /mcp app.
     async with mcp.session_manager.run():
         yield

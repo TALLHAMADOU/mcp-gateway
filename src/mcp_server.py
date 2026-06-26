@@ -8,12 +8,14 @@ Assistants (Claude Code, Codex, Gemini CLI, Copilot CLI) connect to
 ``https://<host>/mcp`` with an ``Authorization: Bearer <MCP_GATEWAY_KEY>`` header.
 """
 import os
+import logging
 import httpx
 import yaml
 import hmac
 from starlette.concurrency import run_in_threadpool
 from mcp.server.fastmcp import FastMCP
 
+from .net_guard import is_upstream_url_allowed
 from .handlers import fs as fs_handler
 from .handlers import postgres as pg_handler
 from .handlers import db as db_handler
@@ -26,7 +28,7 @@ from .handlers import office as office_handler
 from .handlers import google_workspace as gws
 from .handlers import ms_graph as msg
 from .sql_guard import validate_select
-from .plugin_registry import list_plugins
+from .plugin_registry import list_plugins, get_all_plugins
 
 mcp = FastMCP("MCP Gateway")
 # Stateless keeps mounting simple; serve the endpoint at the mount root so the
@@ -36,12 +38,44 @@ mcp.settings.streamable_http_path = "/"
 
 
 # --- connectors registry ----------------------------------------------------
-@mcp.tool()
-def list_connectors() -> list:
-    """List the connectors declared in servers.yaml."""
+def _load_connectors() -> list:
     path = os.path.join(os.getcwd(), "servers.yaml")
     with open(path) as f:
         return (yaml.safe_load(f) or {}).get("connectors", [])
+
+
+@mcp.tool()
+def list_connectors() -> list:
+    """List the connectors declared in servers.yaml."""
+    return _load_connectors()
+
+
+@mcp.tool()
+async def call_connector(connector_id: str, path: str = "", method: str = "GET",
+                         body: dict | None = None) -> dict:
+    """Call a `remote` connector through the gateway (SSRF-guarded).
+
+    For builtin connectors use the dedicated tool instead (e.g. fs_read,
+    pg_query, github_repo). `path` is appended to the connector URL; `method`
+    is an HTTP verb; `body` is sent as JSON for write methods.
+    """
+    connector = next((c for c in _load_connectors() if c.get("id") == connector_id), None)
+    if not connector:
+        raise ValueError(f"connector not found: {connector_id}")
+    if connector.get("type") != "remote" or not connector.get("url"):
+        raise ValueError(
+            f"'{connector_id}' is a builtin connector; use its dedicated tool instead")
+    target = connector["url"].rstrip("/") + "/" + path.lstrip("/")
+    if not is_upstream_url_allowed(target):
+        raise ValueError("upstream resolves to a forbidden/private address")
+    async with httpx.AsyncClient(timeout=30) as c:
+        r = await c.request(method.upper(), target, json=body)
+        out: dict = {"status": r.status_code}
+        try:
+            out["json"] = r.json()
+        except Exception:
+            out["text"] = r.text
+        return out
 
 
 # --- filesystem (sandboxed via fs_handler._resolve) -------------------------
@@ -273,6 +307,34 @@ def list_all_tools_auto_discovery() -> dict:
     """Discover all available tools in the gateway."""
     from src.auto_discovery import generate_tools_json
     return generate_tools_json()
+
+
+# --- dynamic plugin -> MCP tool registration --------------------------------
+_registered_plugin_ids: set[str] = set()
+
+
+def register_plugin_tools() -> int:
+    """Expose every loaded plugin as a callable MCP tool.
+
+    Called at startup *after* ``load_plugins()``. Each plugin's underlying
+    function carries its real (typed) signature via ``functools.wraps``, so
+    FastMCP can derive a correct input schema. Idempotent: a plugin is only
+    registered once even if this runs again (e.g. plugin reload).
+
+    Returns the number of newly registered tools.
+    """
+    count = 0
+    for plugin_id, tool_def in get_all_plugins().items():
+        if plugin_id in _registered_plugin_ids:
+            continue
+        try:
+            mcp.add_tool(tool_def.func, name=plugin_id, description=tool_def.description)
+            _registered_plugin_ids.add(plugin_id)
+            count += 1
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "failed to register plugin as MCP tool: %s", plugin_id)
+    return count
 
 
 # --- ASGI auth wrapper for the mounted MCP app ------------------------------
