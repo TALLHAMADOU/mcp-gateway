@@ -5,10 +5,12 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 import json
 import os
+import time
 import yaml
 import logging
 from datetime import datetime
 import typing
+from starlette.concurrency import run_in_threadpool
 
 dashboard_router = APIRouter()
 audit_logger = logging.getLogger('mcp_audit')
@@ -336,31 +338,110 @@ async def dashboard_home(request: Request):
     return html
 
 
+async def _dispatch_connector(connector_id: str, connector: dict, query: str):
+    """Run `query` against a connector using the real in-process handlers.
+
+    `query` is interpreted per connector type:
+      - remote        -> path appended to the connector URL (proxied, SSRF-guarded)
+      - fs            -> a path (lists a dir, otherwise reads the file)
+      - postgres      -> a SELECT statement
+      - sqlite (db)   -> "<db_path>::<SELECT ...>"
+      - github        -> an API path, e.g. "repos/<owner>/<repo>"
+      - docker        -> "ps" | "images" | "<container id/name>"
+    Raises ValueError for connectors that need a structured payload (office,
+    google_workspace, ms_graph) — use their REST endpoint / MCP tool instead.
+    """
+    ctype = connector.get("type")
+    handler = connector.get("handler")
+
+    if ctype == "remote":
+        from src.mcp_server import call_connector
+        return await call_connector(connector_id, path=query.lstrip("/"))
+
+    if ctype == "builtin_fs" or handler == "fs" or connector_id == "fs_local":
+        from src.handlers import fs
+        target = fs._resolve(query or ".")
+        if os.path.isdir(target):
+            return {"path": query or ".", "entries": sorted(os.listdir(target))}
+        with open(target, "r", encoding="utf-8", errors="replace") as fh:
+            return {"path": query, "content": fh.read(10000)}
+
+    if handler == "postgres" or connector_id == "postgres":
+        from src.handlers import postgres as pg
+        if not pg.POSTGRES_DSN:
+            raise ValueError("POSTGRES_DSN not configured")
+        return await run_in_threadpool(pg._run_query, pg.POSTGRES_DSN, query, None)
+
+    if handler == "db" or connector_id == "db_sqlite":
+        from src.handlers import db
+        from src.sql_guard import validate_select
+        if "::" not in query:
+            raise ValueError("sqlite query format: '<db_path>::<SELECT ...>'")
+        db_path, sql = query.split("::", 1)
+        sql = validate_select(sql.strip())
+        return await run_in_threadpool(db._run_sqlite_query, db_path.strip(), sql, None)
+
+    if handler == "github" or connector_id == "github":
+        from src.handlers.github import gh_get
+        resp = await gh_get(query.strip("/"))
+        return resp.json()
+
+    if handler == "docker" or connector_id == "docker_local":
+        from src.handlers import docker_handler as d
+        q = (query or "ps").strip().lower()
+        if q in ("ps", "containers"):
+            return await run_in_threadpool(d._ps)
+        if q == "images":
+            return await run_in_threadpool(d._images)
+        return await run_in_threadpool(d._inspect, query.strip())
+
+    raise ValueError(
+        f"playground execution not supported for '{connector_id}'; "
+        f"use the /v1/{connector_id} REST endpoint or its MCP tool")
+
+
 @dashboard_router.post("/execute")
 async def execute_connector(payload: dict):
-    """Execute a connector query from the dashboard."""
+    """Execute a connector query from the dashboard using the real handlers."""
     connector_id = payload.get("connector_id")
     query = payload.get("query")
-    
+
     if not connector_id or not query:
         raise HTTPException(status_code=400, detail="Missing connector_id or query")
-    
+
+    config_path = os.path.join(os.getcwd(), 'servers.yaml')
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f) or {}
+    connector = next((c for c in config.get('connectors', []) if c.get('id') == connector_id), None)
+    if not connector:
+        raise HTTPException(status_code=404, detail=f"Connector not found: {connector_id}")
+
+    start = time.perf_counter()
     try:
-        # Load config
-        config_path = os.path.join(os.getcwd(), 'servers.yaml')
-        with open(config_path, 'r') as f:
-            config = yaml.safe_load(f) or {}
-        
-        connector = next((c for c in config.get('connectors', []) if c.get('id') == connector_id), None)
-        if not connector:
-            return {"error": f"Connector not found: {connector_id}"}
-        
-        # For now, just echo back the result (would call actual connector handlers here)
+        result = await _dispatch_connector(connector_id, connector, query)
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        _add_to_history(connector_id, query, str(result)[:500], duration_ms=duration_ms)
         return {
             "connector_id": connector_id,
             "query": query,
-            "result": f"Mock response for {connector_id}",
-            "timestamp": datetime.utcnow().isoformat()
+            "result": result,
+            "duration_ms": duration_ms,
+            "timestamp": datetime.utcnow().isoformat(),
         }
     except Exception as e:
-        return {"error": str(e)}
+        duration_ms = int((time.perf_counter() - start) * 1000)
+        _add_to_history(connector_id, query, None, error=str(e), duration_ms=duration_ms)
+        return {
+            "connector_id": connector_id,
+            "query": query,
+            "error": str(e),
+            "duration_ms": duration_ms,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+
+
+@dashboard_router.get("/history")
+async def execution_history(limit: int = 25):
+    """Return the most recent playground executions (newest first)."""
+    limit = max(1, min(limit, MAX_HISTORY))
+    return {"count": len(_EXECUTION_HISTORY), "entries": _EXECUTION_HISTORY[:limit]}
