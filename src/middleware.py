@@ -2,6 +2,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 import time
+import math
 import asyncio
 import os
 
@@ -31,6 +32,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         self.limit = calls_per_minute
         self.capacity = burst
         self.rate = calls_per_minute / 60.0
+        # Seconds a client should wait before retrying after a 429 (time to
+        # refill one token at the configured rate, floored to 1s).
+        self.retry_after = str(max(1, math.ceil(1.0 / self.rate))) if self.rate > 0 else '1'
         self.use_redis = bool(os.environ.get('REDIS_URL')) and aioredis is not None
         self.redis = None
         if self.use_redis:
@@ -88,7 +92,8 @@ end
                             rate_limit_hits.inc()
                         except Exception:
                             pass
-                    return Response(status_code=429, content='Rate limit exceeded')
+                    return Response(status_code=429, content='Rate limit exceeded',
+                                    headers={'Retry-After': self.retry_after})
             except Exception:
                 # On redis errors, fall back to in-memory logic
                 pass
@@ -102,7 +107,8 @@ end
             tokens = min(self.capacity, tokens + elapsed * self.rate)
             if tokens < 1.0:
                 self.buckets[key] = (tokens, now)
-                return Response(status_code=429, content='Rate limit exceeded')
+                return Response(status_code=429, content='Rate limit exceeded',
+                                headers={'Retry-After': self.retry_after})
             tokens -= 1.0
             self.buckets[key] = (tokens, now)
         return await call_next(request)

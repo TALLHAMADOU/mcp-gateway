@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request, Depends, HTTPException
 from fastapi.responses import JSONResponse, Response
+from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 import os, yaml, httpx, tempfile, logging, hmac
 from .auth import require_api_key, API_KEY
 from .mcp_server import mcp, build_mcp_asgi, register_plugin_tools
@@ -53,7 +54,10 @@ async def lifespan(app: FastAPI):
         yield
 
 
-app = FastAPI(title='MCP Gateway', lifespan=lifespan)
+# Disable the public auto-docs; they are re-exposed below behind the gateway
+# API key so the full API surface is not advertised to anonymous callers.
+app = FastAPI(title='MCP Gateway', lifespan=lifespan,
+              docs_url=None, redoc_url=None, openapi_url=None)
 # attach rate limiting middleware (in-memory token buckets)
 app.add_middleware(RateLimitMiddleware)
 
@@ -106,6 +110,23 @@ app.include_router(dashboard_router, prefix='/dashboard', dependencies=_AUTH)
 
 # Health checks (no auth required - needed by load balancers/k8s)
 app.include_router(health_router)
+
+
+# OpenAPI schema + interactive docs, gated by the gateway API key.
+# Call them with: Authorization: Bearer <MCP_GATEWAY_KEY>
+@app.get('/openapi.json', include_in_schema=False)
+async def protected_openapi(api_key: str = Depends(require_api_key)):
+    return JSONResponse(app.openapi())
+
+
+@app.get('/docs', include_in_schema=False)
+async def protected_docs(api_key: str = Depends(require_api_key)):
+    return get_swagger_ui_html(openapi_url='/openapi.json', title='MCP Gateway API')
+
+
+@app.get('/redoc', include_in_schema=False)
+async def protected_redoc(api_key: str = Depends(require_api_key)):
+    return get_redoc_html(openapi_url='/openapi.json', title='MCP Gateway API')
 
 
 def load_config():
@@ -252,7 +273,7 @@ async def list_all_tools(api_key: str = Depends(require_api_key)):
 @app.get('/v1/auto-discovery/registration')
 async def get_registration_script(api_key: str = Depends(require_api_key)):
     """Get MCP registration script for Claude Desktop, Cursor, etc."""
-    gateway_url = os.environ.get('GATEWAY_URL', 'http://localhost:8000')
+    gateway_url = os.environ.get('GATEWAY_URL') or os.environ.get('MCP_GATEWAY_URL', 'http://localhost:8080')
     script = generate_mcp_registration_script(gateway_url=gateway_url, api_key=api_key)
     return JSONResponse({"script": script})
 
@@ -261,7 +282,7 @@ async def get_registration_script(api_key: str = Depends(require_api_key)):
 async def save_registration(payload: dict, api_key: str = Depends(require_api_key)):
     """Save registration configuration (generates config file)."""
     client_type = payload.get("client_type", "claude-desktop")  # claude-desktop, cursor, copilot-cli
-    gateway_url = payload.get("gateway_url", "http://localhost:8000")
+    gateway_url = payload.get("gateway_url", "http://localhost:8080")
     
     # Generate appropriate config based on client type
     if client_type == "claude-desktop":

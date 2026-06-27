@@ -129,7 +129,7 @@ def get_all_tools() -> Dict[str, Dict[str, Any]]:
     return tools
 
 
-def generate_mcp_registration_script(gateway_url: str = "http://localhost:8000", api_key: str = "sk_") -> str:
+def generate_mcp_registration_script(gateway_url: str = "http://localhost:8080", api_key: str = "sk_") -> str:
     """
     Generate shell commands to register the gateway with Claude, Cursor, etc.
     
@@ -164,7 +164,7 @@ cat << 'JSON'
 {{
   "mcpServers": {{
     "gateway": {{
-      "url": "http://localhost:8000/mcp",
+      "url": "{gateway_url}/mcp",
       "env": {{
         "MCP_GATEWAY_KEY": "your-api-key-here"
       }}
@@ -180,7 +180,7 @@ cat << 'JSON'
 {{
   "mcpServers": {{
     "gateway": {{
-      "url": "http://localhost:8000/mcp",
+      "url": "{gateway_url}/mcp",
       "env": {{
         "MCP_GATEWAY_KEY": "your-api-key-here"
       }}
@@ -191,7 +191,7 @@ JSON
 
 echo ""
 echo "3. Using Copilot CLI:"
-echo "   Run: copilot mcp add gateway --url http://localhost:8000/mcp --key your-api-key-here"
+echo "   Run: copilot mcp add gateway --url {gateway_url}/mcp --key your-api-key-here"
 echo ""
 echo "✅ Registration commands ready! Replace 'your-api-key-here' with your actual API key."
 """
