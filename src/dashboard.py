@@ -421,6 +421,8 @@ async def execute_connector(payload: dict):
         result = await _dispatch_connector(connector_id, connector, query)
         duration_ms = int((time.perf_counter() - start) * 1000)
         _add_to_history(connector_id, query, str(result)[:500], duration_ms=duration_ms)
+        audit_logger.info('dashboard.execute', extra={
+            'connector_id': connector_id, 'status': 'ok', 'duration_ms': duration_ms})
         return {
             "connector_id": connector_id,
             "query": query,
@@ -431,6 +433,8 @@ async def execute_connector(payload: dict):
     except Exception as e:
         duration_ms = int((time.perf_counter() - start) * 1000)
         _add_to_history(connector_id, query, None, error=str(e), duration_ms=duration_ms)
+        audit_logger.info('dashboard.execute', extra={
+            'connector_id': connector_id, 'status': 'error', 'duration_ms': duration_ms})
         return {
             "connector_id": connector_id,
             "query": query,

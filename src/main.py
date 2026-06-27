@@ -11,14 +11,15 @@ from .plugin_registry import load_plugins, list_plugins, get_plugin, unload_plug
 from .dashboard import dashboard_router
 from .health import health_router
 from .logging_config import setup_json_logging
+from .audit import setup_audit_logging, read_audit
 from .auto_discovery import get_all_tools, generate_tools_json, generate_mcp_registration_script
 
 # Setup JSON logging if LOG_JSON env var is set
 setup_json_logging()
 
-# basic logging & audit logger
+# basic logging & audit logger (persisted to an append-only JSONL file)
 logging.basicConfig(level=logging.INFO)
-audit_logger = logging.getLogger('mcp_audit')
+audit_logger = setup_audit_logging()
 
 # metrics
 try:
@@ -226,6 +227,19 @@ async def register_connector(payload: dict, request: Request, api_key: str = Dep
             pass
 
     return {'ok': True, 'connector': payload}
+
+
+@app.get('/v1/audit')
+async def get_audit(limit: int = 100, api_key: str = Depends(require_api_key), x_admin_key: typing.Optional[str] = Header(None, alias='X-Admin-Key')):
+    """Read recent persisted audit entries (requires the admin key)."""
+    if not ADMIN_KEY:
+        raise HTTPException(status_code=403, detail='Audit access disabled: ADMIN_KEY not configured')
+    if not x_admin_key:
+        raise HTTPException(status_code=401, detail='Missing X-Admin-Key header')
+    if not hmac.compare_digest(x_admin_key, ADMIN_KEY):
+        raise HTTPException(status_code=403, detail='Invalid admin key')
+    entries = read_audit(limit)
+    return {'count': len(entries), 'entries': entries}
 
 
 @app.api_route('/v1/proxy/{connector_id}/{path:path}', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH'])
