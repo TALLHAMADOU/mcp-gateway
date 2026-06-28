@@ -379,12 +379,48 @@ pytest -q
 
 Couvre : auth (401/403/200), confinement filesystem, garde SQL `SELECT`-only, états *non configurés* des connecteurs cloud, et génération réelle DOCX/XLSX/PPTX (vérification ZIP OOXML, sautée si les libs optionnelles sont absentes).
 
-## Ajouter un connecteur
+## Ajouter un serveur / connecteur
 
-1. Déclarer l'entrée dans `servers.yaml` (`id`, `type`, `handler` ou `url` si `remote`).
-2. Builtin : créer `src/handlers/<nom>.py` (un `APIRouter`) et le monter dans `src/main.py` avec `dependencies=_AUTH`.
-3. (optionnel) Exposer un outil MCP dans `src/mcp_server.py` appelant la même fonction.
-4. Ajouter un test + documenter l'endpoint. Redémarrer.
+Trois cas, du plus simple au plus impliquant. Ne pas confondre un **connecteur REST**
+(une API HTTP que la passerelle proxifie) avec un **serveur MCP amont** (un service
+parlant le protocole MCP) : voir le cas C.
+
+### A. Connecteur distant (REST) — *config uniquement, pas de code*
+
+Une API HTTP publique (`https://`, hôte publiquement résolvable — la garde SSRF
+rejette le privé/loopback).
+
+1. Déclarer dans `servers.yaml` :
+   ```yaml
+   - id: my_api
+     type: remote
+     url: https://api.example.com
+     description: Mon API
+   ```
+   …ou à chaud via `POST /v1/admin/register` (nécessite `ADMIN_KEY` + `X-Admin-Key`).
+2. Appel : REST `→/v1/proxy/my_api/<path>`, ou outil MCP `call_connector("my_api", path=…)`.
+   Aucun redémarrage de code n'est requis (la config est relue à chaque appel).
+
+### B. Capacité *builtin* (nouveau handler local) — *du code*
+
+Une nouvelle intégration servie en interne (système, SDK, API avec logique propre).
+
+1. Créer `src/handlers/<nom>.py` exposant un `APIRouter`.
+2. Le monter dans `src/main.py` : `app.include_router(<nom>_router, prefix='/v1/<scope>', dependencies=_AUTH)`.
+3. **RBAC** : le segment après `/v1/` devient le *scope* requis. Documenter-le et
+   l'accorder aux clés concernées via `MCP_GATEWAY_KEYS` (`{"sk_x":["<scope>"]}`).
+4. (optionnel mais recommandé) Exposer un outil MCP dans `src/mcp_server.py` via
+   `@mcp.tool()`, appelant la **même** fonction in-process (pas de self-HTTP).
+5. Déclarer l'entrée dans `servers.yaml` (`type: builtin`, `handler: <nom>`), ajouter
+   un test sous `tests/`, redémarrer.
+
+### C. Brancher un serveur MCP amont (proxy de protocole MCP) — *non supporté en l'état*
+
+Agréger les *tools* d'un serveur MCP tiers (stdio ou streamable-HTTP) et les ré-exposer
+sous `/mcp`. La passerelle ne fait pas encore ce pont : `call_connector` parle HTTP brut,
+pas le protocole MCP. Il faudrait un client MCP amont (`mcp.client`) qui, au démarrage,
+se connecte au serveur cible, liste ses tools et les enregistre dynamiquement comme
+`@mcp.tool()` (à l'image de `register_plugin_tools`). À spécifier si besoin.
 
 ## Roadmap
 
@@ -392,9 +428,13 @@ Couvre : auth (401/403/200), confinement filesystem, garde SQL `SELECT`-only, é
 - [x] Serveur MCP natif `/mcp` (streamable HTTP)
 - [x] Suites bureautique (local / Google / Microsoft 365)
 - [x] Tests + CI · dépendances épinglées
-- [ ] Rate-limiting sur `/mcp` et `/v1/*`
-- [ ] Refresh automatique des tokens OAuth (Google/MS)
-- [ ] Auth avancée : OAuth2, mTLS, RBAC
+- [x] Rate-limiting sur `/mcp` et `/v1/*` (token bucket, `Retry-After`)
+- [x] Refresh automatique des tokens OAuth (Google/MS)
+- [x] RBAC : clés multiples scopées par segment (`MCP_GATEWAY_KEYS`)
+- [x] Audit log persistant (JSONL rotatif) + lecteur `/v1/audit`
+- [x] Déploiement durci : conteneur non-root, manifests k8s, probes 200/503
+- [ ] Auth avancée : OAuth2 (flux entrant), mTLS
+- [ ] Pont serveur MCP amont (cas C ci-dessus)
 - [ ] UI d'administration · proxy WebSocket CDP complet
 
 ## Contribution
