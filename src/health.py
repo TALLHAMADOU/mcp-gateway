@@ -1,6 +1,7 @@
 """Health check endpoints and status monitoring."""
 
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 import os
 import psutil
 import asyncio
@@ -84,7 +85,7 @@ async def readiness_check():
         redis_status.get("status") != "error"
     )
     
-    return {
+    body = {
         "ready": ready,
         "version": os.environ.get('VERSION', 'dev'),
         "uptime_seconds": int(uptime_seconds),
@@ -94,6 +95,9 @@ async def readiness_check():
             "redis": redis_status
         }
     }
+    # Reflect readiness in the HTTP status so a k8s readinessProbe actually
+    # gates traffic (200 when ready, 503 when a dependency is down).
+    return JSONResponse(body, status_code=200 if ready else 503)
 
 
 @health_router.get("/health/live")
