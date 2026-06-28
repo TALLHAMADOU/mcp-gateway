@@ -120,3 +120,58 @@ def test_call_none_arguments_becomes_empty_dict():
     mcp_upstream._registry["srv"] = {"session": session, "tools": []}
     asyncio.run(mcp_upstream.mcp_upstream_call("srv", "noargs"))
     assert session.calls == [("noargs", {})]
+
+
+# --- first-class per-tool registration --------------------------------------
+
+@pytest.fixture
+def _clean_first_class():
+    from src.mcp_server import mcp
+    yield mcp
+    for name in list(mcp_upstream._registered_tool_names):
+        mcp._tool_manager._tools.pop(name, None)
+    mcp_upstream._registered_tool_names.clear()
+
+
+def test_first_class_tool_exposes_schema_and_relays(_clean_first_class):
+    mcp = _clean_first_class
+    rt = _Tool("read_file")
+    rt.inputSchema = {"type": "object",
+                      "properties": {"path": {"type": "string"}},
+                      "required": ["path"]}
+    session = _FakeSession(_Result([_Text("data")]))
+
+    n = mcp_upstream._register_first_class("srv", [rt], session)
+    assert n == 1
+
+    tool = mcp._tool_manager.get_tool("srv__read_file")
+    assert tool is not None
+    # the advertised inputSchema is the upstream one, verbatim
+    assert tool.parameters["required"] == ["path"]
+
+    out = asyncio.run(tool.run({"path": "/x"}))
+    assert out["content"] == [{"type": "text", "text": "data"}]
+    assert session.calls == [("read_file", {"path": "/x"})]
+
+
+def test_first_class_validates_required_args(_clean_first_class):
+    mcp = _clean_first_class
+    rt = _Tool("read_file")
+    rt.inputSchema = {"type": "object",
+                      "properties": {"path": {"type": "string"}},
+                      "required": ["path"]}
+    mcp_upstream._register_first_class("srv", [rt], _FakeSession(_Result([])))
+
+    tool = mcp._tool_manager.get_tool("srv__read_file")
+    with pytest.raises(Exception):  # missing required 'path'
+        asyncio.run(tool.run({}))
+
+
+def test_first_class_skips_name_collision(_clean_first_class):
+    mcp = _clean_first_class
+    rt = _Tool("dup")
+    rt.inputSchema = {"type": "object", "properties": {}}
+    s = _FakeSession(_Result([]))
+    assert mcp_upstream._register_first_class("srv", [rt], s) == 1
+    # second pass: name already present -> skipped, not duplicated
+    assert mcp_upstream._register_first_class("srv", [rt], s) == 0

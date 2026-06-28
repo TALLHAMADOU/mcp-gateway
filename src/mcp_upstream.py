@@ -11,10 +11,11 @@ Two transports:
                 so it is **opt-in** via ``MCP_UPSTREAM_ENABLE_STDIO=1`` (it
                 otherwise contradicts the hardened non-root/read-only runtime).
 
-Discovery and invocation are exposed as two generic MCP tools
-(``mcp_upstream_list`` / ``mcp_upstream_call``): the former returns each
-upstream tool's real JSON input schema, the latter relays a call. This keeps the
-bridge robust across FastMCP versions (no reliance on per-tool schema injection).
+Each upstream tool is re-exposed as a **first-class** MCP tool named
+``<server>__<tool>`` carrying the upstream JSON input schema, so assistants see
+and call it natively. Two generic tools (``mcp_upstream_list`` /
+``mcp_upstream_call``) remain as a discovery aid and a robust fallback if a
+tool's schema can't be modelled.
 
 Config file (default ``mcp_servers.yaml``, override with ``MCP_SERVERS_CONFIG``):
 
@@ -33,10 +34,12 @@ Config file (default ``mcp_servers.yaml``, override with ``MCP_SERVERS_CONFIG``)
 ``${VAR}`` placeholders anywhere in the config are filled from the environment,
 so secrets stay out of the file.
 """
+import keyword
 import logging
 import os
 import re
 from contextlib import AsyncExitStack
+from typing import Any
 
 import yaml
 
@@ -47,6 +50,9 @@ log = logging.getLogger(__name__)
 
 # name -> {"session": ClientSession, "tools": [Tool, ...]}
 _registry: dict = {}
+# names of the per-tool ("first-class") proxies we injected into the MCP server,
+# tracked so shutdown() can remove them again.
+_registered_tool_names: list = []
 _stack: "AsyncExitStack | None" = None
 
 _VAR = re.compile(r"\$\{(\w+)\}")
@@ -123,6 +129,90 @@ async def _connect_one(name: str, cfg: dict, stack: AsyncExitStack):
     return session, tools
 
 
+# --- first-class registration (one MCP tool per upstream tool) --------------
+
+def _sanitize_name(name: str) -> str:
+    """Keep tool names within the MCP-safe charset."""
+    return re.sub(r"[^a-zA-Z0-9_-]", "_", name)
+
+
+def _field_for(prop: str, required: bool):
+    """Return (python_field_name, alias) — aliasing non-identifier prop names."""
+    if prop.isidentifier() and not keyword.iskeyword(prop):
+        return prop, None
+    safe = "f_" + re.sub(r"\W", "_", prop)
+    if not safe.isidentifier():
+        safe = "f_" + str(abs(hash(prop)) % 100000)
+    return safe, prop
+
+
+def _build_arg_model(model_name: str, schema: dict):
+    """Build a pydantic model mirroring the upstream tool's top-level params.
+
+    Only the field *names* and required-ness matter (values are forwarded as-is,
+    typed ``Any``): the schema advertised to clients is the upstream one, set on
+    the Tool's ``parameters`` separately.
+    """
+    from pydantic import Field, create_model
+    from mcp.server.fastmcp.utilities.func_metadata import ArgModelBase
+
+    props = (schema or {}).get("properties") or {}
+    required = set((schema or {}).get("required") or [])
+    fields: dict = {}
+    for prop in props:
+        fn_name, alias = _field_for(prop, prop in required)
+        default = ... if prop in required else None
+        fields[fn_name] = (Any, Field(default, alias=alias)) if alias else (Any, default)
+    return create_model(model_name, __base__=ArgModelBase, **fields)
+
+
+def _make_proxy_fn(server: str, tool: str, session):
+    async def _fn(**kwargs):
+        args = {k: v for k, v in kwargs.items() if v is not None}
+        return _serialize_result(await session.call_tool(tool, args))
+    return _fn
+
+
+def _register_first_class(server: str, tools, session) -> int:
+    """Inject one namespaced MCP tool (`<server>__<tool>`) per upstream tool.
+
+    Best-effort: a tool that can't be modelled is logged and skipped — the
+    generic `mcp_upstream_call` remains a fallback for everything.
+    """
+    try:
+        from mcp.server.fastmcp.tools.base import Tool
+        from mcp.server.fastmcp.utilities.func_metadata import FuncMetadata
+        store = mcp._tool_manager._tools
+    except Exception:
+        log.warning("mcp-upstream: FastMCP internals unavailable; "
+                    "first-class tools disabled (generic bridge still works)")
+        return 0
+
+    count = 0
+    for rt in tools:
+        full = _sanitize_name(f"{server}__{rt.name}")
+        if full in store:
+            log.warning("mcp-upstream: tool %r already registered, skipping", full)
+            continue
+        try:
+            schema = getattr(rt, "inputSchema", None) or {"type": "object", "properties": {}}
+            tool_obj = Tool(
+                fn=_make_proxy_fn(server, rt.name, session),
+                name=full, title=None,
+                description=getattr(rt, "description", None) or f"{rt.name} (via {server})",
+                parameters=schema,
+                fn_metadata=FuncMetadata(arg_model=_build_arg_model(f"{full}_Args", schema)),
+                is_async=True, context_kwarg=None, annotations=None,
+            )
+            store[full] = tool_obj
+            _registered_tool_names.append(full)
+            count += 1
+        except Exception:
+            log.exception("mcp-upstream: first-class registration failed for %s/%s",
+                          server, rt.name)
+    return count
+
+
 async def startup() -> int:
     """Connect every configured upstream server. Returns the tool count.
 
@@ -147,14 +237,23 @@ async def startup() -> int:
             log.exception("mcp-upstream: failed to connect %r (skipped)", name)
             continue
         _registry[name] = {"session": session, "tools": tools}
+        fc = _register_first_class(name, tools, session)
         total += len(tools)
-        log.info("mcp-upstream: connected %r (%d tools)", name, len(tools))
+        log.info("mcp-upstream: connected %r (%d tools, %d first-class)",
+                 name, len(tools), fc)
     return total
 
 
 async def shutdown() -> None:
-    """Close all upstream sessions/transports."""
+    """Close all upstream sessions/transports and drop injected tools."""
     global _stack
+    try:
+        store = mcp._tool_manager._tools
+        for name in _registered_tool_names:
+            store.pop(name, None)
+    except Exception:
+        log.exception("mcp-upstream: error removing first-class tools")
+    _registered_tool_names.clear()
     _registry.clear()
     if _stack is not None:
         try:

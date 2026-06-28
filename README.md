@@ -432,9 +432,11 @@ MCP, pas une simple API REST) et les ré-exposer sous `/mcp`, sans écrire de co
        args: ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
    ```
    Les placeholders `${VAR}` sont remplis depuis l'environnement (secrets hors fichier).
-2. Au démarrage, la passerelle se connecte à chaque serveur, liste ses tools et les
-   expose via deux outils MCP génériques : **`mcp_upstream_list`** (découverte, rend le
-   schéma JSON de chaque tool) et **`mcp_upstream_call(server, tool, arguments)`** (relais).
+2. Au démarrage, la passerelle se connecte à chaque serveur, liste ses tools et expose
+   **chacun comme un outil MCP first-class** nommé `<serveur>__<tool>` portant le schéma
+   JSON d'origine (les assistants le voient et l'appellent nativement). Deux outils
+   génériques restent disponibles en appoint : **`mcp_upstream_list`** (découverte) et
+   **`mcp_upstream_call(server, tool, arguments)`** (fallback si un schéma est inmodélisable).
 3. Garde-fous : `http` passe par la garde SSRF ; `stdio` lance un process local donc reste
    **opt-in** (`MCP_UPSTREAM_ENABLE_STDIO=1`) ; un serveur injoignable est loggé et ignoré
    (jamais de crash). Voir `src/mcp_upstream.py`.
@@ -451,8 +453,8 @@ MCP, pas une simple API REST) et les ré-exposer sous `/mcp`, sans écrire de co
 - [x] Audit log persistant (JSONL rotatif) + lecteur `/v1/audit`
 - [x] Déploiement durci : conteneur non-root, manifests k8s, probes 200/503
 - [x] Pont serveur MCP amont configurable (cas C — stdio + streamable-HTTP)
+- [x] Pont MCP : tools amont exposés en *first-class* (`<serveur>__<tool>`, schéma par tool)
 - [ ] Auth avancée : OAuth2 (flux entrant), mTLS
-- [ ] Pont MCP : enregistrement des tools amont en *first-class* (schéma par tool)
 - [ ] UI d'administration · proxy WebSocket CDP complet
 
 ## Contribution
