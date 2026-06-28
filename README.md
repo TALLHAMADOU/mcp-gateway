@@ -23,9 +23,10 @@
 11. [Configuration & variables d'environnement](#configuration--variables-denvironnement)
 12. [Sécurité](#sécurité)
 13. [Tests](#tests)
-14. [Ajouter un connecteur](#ajouter-un-connecteur)
+14. [Ajouter un serveur / connecteur](#ajouter-un-serveur--connecteur)
 15. [Roadmap](#roadmap)
-16. [Licence](#licence)
+16. [Contribution](#contribution)
+17. [Licence](#licence)
 
 ---
 
@@ -254,6 +255,7 @@ copilot mcp add --type http --url https://gw.example.com/mcp \
 | **Bureautique (local)** | `office_create_docx`, `office_create_xlsx`, `office_create_pptx`, `office_convert` |
 | **Google Workspace** | `gdrive_files`, `gdoc_get`, `gdoc_create`, `gsheet_values`, `gslides_get` |
 | **Microsoft 365** | `onedrive_root`, `onedrive_search`, `msexcel_worksheets`, `msexcel_range` |
+| **Pont MCP amont** | `mcp_upstream_list`, `mcp_upstream_call`, + un outil first-class `<serveur>__<tool>` par tool bridgé (voir [cas C](#ajouter-un-serveur--connecteur)) |
 
 > Le détail des flags peut varier selon la version de chaque CLI ; seul le couple **URL + Bearer** est invariant.
 
@@ -407,7 +409,7 @@ Une nouvelle intégration servie en interne (système, SDK, API avec logique pro
 
 1. Créer `src/handlers/<nom>.py` exposant un `APIRouter`.
 2. Le monter dans `src/main.py` : `app.include_router(<nom>_router, prefix='/v1/<scope>', dependencies=_AUTH)`.
-3. **RBAC** : le segment après `/v1/` devient le *scope* requis. Documenter-le et
+3. **RBAC** : le segment après `/v1/` devient le *scope* requis. Le documenter et
    l'accorder aux clés concernées via `MCP_GATEWAY_KEYS` (`{"sk_x":["<scope>"]}`).
 4. (optionnel mais recommandé) Exposer un outil MCP dans `src/mcp_server.py` via
    `@mcp.tool()`, appelant la **même** fonction in-process (pas de self-HTTP).
@@ -436,7 +438,7 @@ MCP, pas une simple API REST) et les ré-exposer sous `/mcp`, sans écrire de co
    **chacun comme un outil MCP first-class** nommé `<serveur>__<tool>` portant le schéma
    JSON d'origine (les assistants le voient et l'appellent nativement). Deux outils
    génériques restent disponibles en appoint : **`mcp_upstream_list`** (découverte) et
-   **`mcp_upstream_call(server, tool, arguments)`** (fallback si un schéma est inmodélisable).
+   **`mcp_upstream_call(server, tool, arguments)`** (fallback si un schéma n'est pas modélisable).
 3. Garde-fous : `http` passe par la garde SSRF ; `stdio` lance un process local donc reste
    **opt-in** (`MCP_UPSTREAM_ENABLE_STDIO=1`) ; un serveur injoignable est loggé et ignoré
    (jamais de crash). Voir `src/mcp_upstream.py`.
