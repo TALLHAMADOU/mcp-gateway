@@ -36,8 +36,12 @@ async def check_redis() -> dict:
     """Check Redis connectivity."""
     try:
         import redis.asyncio
-        redis_url = os.environ.get('REDIS_URL', 'redis://localhost:6379')
-        
+        redis_url = os.environ.get('REDIS_URL')
+        if not redis_url:
+            # Redis is optional (the rate-limiter falls back to in-memory);
+            # an unconfigured Redis must not gate readiness.
+            return {"status": "unknown", "message": "REDIS_URL not set"}
+
         # Try to ping with 2s timeout
         client = redis.asyncio.from_url(redis_url)
         result = await asyncio.wait_for(

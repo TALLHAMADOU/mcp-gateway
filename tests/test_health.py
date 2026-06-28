@@ -1,3 +1,4 @@
+import asyncio
 from fastapi.testclient import TestClient
 from src.main import app
 from src import health
@@ -32,3 +33,18 @@ def test_ready_503_when_dependency_down(monkeypatch):
     r = client.get('/health/ready')
     assert r.status_code == 503
     assert r.json()['ready'] is False
+
+
+def test_unconfigured_redis_does_not_gate_readiness(monkeypatch):
+    # Redis is optional (rate-limiter falls back to in-memory): with REDIS_URL
+    # unset, check_redis must report "unknown" (not "error") so readiness stays
+    # 200 instead of perpetually 503 in deployments without Redis.
+    monkeypatch.delenv('REDIS_URL', raising=False)
+    monkeypatch.setattr(health, 'check_postgres', _ok)  # real check_redis runs
+
+    status = asyncio.run(health.check_redis())
+    assert status['status'] == 'unknown'
+
+    r = client.get('/health/ready')
+    assert r.status_code == 200
+    assert r.json()['ready'] is True
