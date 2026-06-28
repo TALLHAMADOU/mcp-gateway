@@ -12,6 +12,7 @@ from .dashboard import dashboard_router
 from .health import health_router
 from .logging_config import setup_json_logging
 from .audit import setup_audit_logging, read_audit
+from . import mcp_upstream
 from .auto_discovery import get_all_tools, generate_tools_json, generate_mcp_registration_script
 
 # Setup JSON logging if LOG_JSON env var is set
@@ -50,9 +51,21 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logging.error(f"Failed to load/register plugins: {e}")
 
+    # Connect any third-party MCP servers declared in mcp_servers.yaml and
+    # expose their tools through this gateway (bridge / "cas C").
+    try:
+        n_up = await mcp_upstream.startup()
+        if n_up:
+            logging.info(f"Upstream MCP bridge: {n_up} tool(s) from external servers")
+    except Exception as e:
+        logging.error(f"Failed to start upstream MCP bridge: {e}")
+
     # Run the MCP streamable-HTTP session manager for the mounted /mcp app.
     async with mcp.session_manager.run():
-        yield
+        try:
+            yield
+        finally:
+            await mcp_upstream.shutdown()
 
 
 # Disable the public auto-docs; they are re-exposed below behind the gateway

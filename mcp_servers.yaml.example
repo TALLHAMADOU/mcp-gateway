@@ -1,0 +1,28 @@
+# Upstream MCP servers bridged through this gateway ("cas C").
+#
+# Copy to mcp_servers.yaml (or point MCP_SERVERS_CONFIG at it). Each entry is a
+# third-party MCP server whose tools are re-exposed under /mcp via the generic
+# tools `mcp_upstream_list` and `mcp_upstream_call`.
+#
+# ${VAR} placeholders are filled from the environment, so secrets stay out here.
+
+mcp_servers:
+
+  # --- Remote streamable-HTTP MCP server (SSRF-guarded; needs https + public) ---
+  company:
+    transport: http
+    url: https://mcp.example.com/mcp
+    headers:
+      Authorization: "Bearer ${COMPANY_MCP_TOKEN}"
+    # disabled: true        # keep the entry but skip connecting
+
+  # --- Local stdio MCP server (spawns a process) ---
+  # Requires MCP_UPSTREAM_ENABLE_STDIO=1 — it runs an arbitrary command, which
+  # is off by default on the hardened (non-root, read-only) runtime.
+  filesystem:
+    transport: stdio
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
+    env:
+      EXAMPLE_FLAG: "1"
+    disabled: true

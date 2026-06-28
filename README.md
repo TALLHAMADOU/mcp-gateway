@@ -414,13 +414,30 @@ Une nouvelle intégration servie en interne (système, SDK, API avec logique pro
 5. Déclarer l'entrée dans `servers.yaml` (`type: builtin`, `handler: <nom>`), ajouter
    un test sous `tests/`, redémarrer.
 
-### C. Brancher un serveur MCP amont (proxy de protocole MCP) — *non supporté en l'état*
+### C. Brancher un serveur MCP amont (pont de protocole MCP) — *config uniquement*
 
-Agréger les *tools* d'un serveur MCP tiers (stdio ou streamable-HTTP) et les ré-exposer
-sous `/mcp`. La passerelle ne fait pas encore ce pont : `call_connector` parle HTTP brut,
-pas le protocole MCP. Il faudrait un client MCP amont (`mcp.client`) qui, au démarrage,
-se connecte au serveur cible, liste ses tools et les enregistre dynamiquement comme
-`@mcp.tool()` (à l'image de `register_plugin_tools`). À spécifier si besoin.
+Agréger les *tools* d'un serveur MCP **tiers** (un autre logiciel parlant le protocole
+MCP, pas une simple API REST) et les ré-exposer sous `/mcp`, sans écrire de code.
+
+1. Copier `mcp_servers.yaml.example` → `mcp_servers.yaml` (ou pointer `MCP_SERVERS_CONFIG`) :
+   ```yaml
+   mcp_servers:
+     company:
+       transport: http
+       url: https://mcp.example.com/mcp
+       headers: { Authorization: "Bearer ${COMPANY_MCP_TOKEN}" }
+     filesystem:
+       transport: stdio          # process local — exige MCP_UPSTREAM_ENABLE_STDIO=1
+       command: npx
+       args: ["-y", "@modelcontextprotocol/server-filesystem", "/data"]
+   ```
+   Les placeholders `${VAR}` sont remplis depuis l'environnement (secrets hors fichier).
+2. Au démarrage, la passerelle se connecte à chaque serveur, liste ses tools et les
+   expose via deux outils MCP génériques : **`mcp_upstream_list`** (découverte, rend le
+   schéma JSON de chaque tool) et **`mcp_upstream_call(server, tool, arguments)`** (relais).
+3. Garde-fous : `http` passe par la garde SSRF ; `stdio` lance un process local donc reste
+   **opt-in** (`MCP_UPSTREAM_ENABLE_STDIO=1`) ; un serveur injoignable est loggé et ignoré
+   (jamais de crash). Voir `src/mcp_upstream.py`.
 
 ## Roadmap
 
@@ -433,8 +450,9 @@ se connecte au serveur cible, liste ses tools et les enregistre dynamiquement co
 - [x] RBAC : clés multiples scopées par segment (`MCP_GATEWAY_KEYS`)
 - [x] Audit log persistant (JSONL rotatif) + lecteur `/v1/audit`
 - [x] Déploiement durci : conteneur non-root, manifests k8s, probes 200/503
+- [x] Pont serveur MCP amont configurable (cas C — stdio + streamable-HTTP)
 - [ ] Auth avancée : OAuth2 (flux entrant), mTLS
-- [ ] Pont serveur MCP amont (cas C ci-dessus)
+- [ ] Pont MCP : enregistrement des tools amont en *first-class* (schéma par tool)
 - [ ] UI d'administration · proxy WebSocket CDP complet
 
 ## Contribution
