@@ -114,7 +114,7 @@ def convert_file(source_path: str, to: str) -> str:
         except Exception:
             raise RuntimeError('container runner not available')
         os.makedirs(OUTPUT_DIR, exist_ok=True)
-        return run_libreoffice_container(src, OUTPUT_DIR)
+        return run_libreoffice_container(src, OUTPUT_DIR, to)
 
     soffice = shutil.which('soffice') or shutil.which('libreoffice')
     if not soffice:
