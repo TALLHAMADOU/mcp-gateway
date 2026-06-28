@@ -6,27 +6,30 @@ Mint it from a service account or the OAuth playground; the gateway only
 forwards it as a bearer token.
 """
 from fastapi import APIRouter, HTTPException
-import os
 import httpx
+
+from ..oauth import google_token
 
 router = APIRouter()
 
-GOOGLE_ACCESS_TOKEN = os.environ.get('GOOGLE_ACCESS_TOKEN')
 DRIVE = 'https://www.googleapis.com/drive/v3'
 DOCS = 'https://docs.googleapis.com/v1'
 SHEETS = 'https://sheets.googleapis.com/v4'
 SLIDES = 'https://slides.googleapis.com/v1'
 
 
-def _headers():
-    if not GOOGLE_ACCESS_TOKEN:
-        raise HTTPException(status_code=400, detail='GOOGLE_ACCESS_TOKEN not configured')
-    return {'Authorization': f'Bearer {GOOGLE_ACCESS_TOKEN}', 'Content-Type': 'application/json'}
+async def _auth_headers():
+    try:
+        token = await google_token.get()
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
 
 
 async def g_request(method: str, url: str, *, params=None, json=None):
+    headers = await _auth_headers()
     async with httpx.AsyncClient(timeout=30) as c:
-        r = await c.request(method, url, headers=_headers(), params=params, json=json)
+        r = await c.request(method, url, headers=headers, params=params, json=json)
         if r.status_code >= 400:
             raise HTTPException(status_code=r.status_code, detail=r.text)
         return r.json()
@@ -34,7 +37,7 @@ async def g_request(method: str, url: str, *, params=None, json=None):
 
 @router.get('/health')
 async def health():
-    return {'status': 'ok', 'handler': 'google_workspace', 'configured': bool(GOOGLE_ACCESS_TOKEN)}
+    return {'status': 'ok', 'handler': 'google_workspace', 'configured': google_token.configured}
 
 
 @router.get('/drive/files')

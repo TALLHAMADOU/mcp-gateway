@@ -6,24 +6,27 @@ to reach Office 365 from a Linux host — the desktop Office pack on Windows is
 NOT driven from here.
 """
 from fastapi import APIRouter, HTTPException, Response
-import os
 import httpx
+
+from ..oauth import ms_token
 
 router = APIRouter()
 
-MS_GRAPH_TOKEN = os.environ.get('MS_GRAPH_TOKEN')
 GRAPH = 'https://graph.microsoft.com/v1.0'
 
 
-def _headers():
-    if not MS_GRAPH_TOKEN:
-        raise HTTPException(status_code=400, detail='MS_GRAPH_TOKEN not configured')
-    return {'Authorization': f'Bearer {MS_GRAPH_TOKEN}'}
+async def _auth_headers():
+    try:
+        token = await ms_token.get()
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {'Authorization': f'Bearer {token}'}
 
 
 async def graph_get(path: str, *, params=None, raw=False):
+    headers = await _auth_headers()
     async with httpx.AsyncClient(timeout=30) as c:
-        r = await c.get(f'{GRAPH}/{path.lstrip("/")}', headers=_headers(), params=params)
+        r = await c.get(f'{GRAPH}/{path.lstrip("/")}', headers=headers, params=params)
         if r.status_code >= 400:
             raise HTTPException(status_code=r.status_code, detail=r.text)
         return r if raw else r.json()
@@ -31,7 +34,7 @@ async def graph_get(path: str, *, params=None, raw=False):
 
 @router.get('/health')
 async def health():
-    return {'status': 'ok', 'handler': 'ms_graph', 'configured': bool(MS_GRAPH_TOKEN)}
+    return {'status': 'ok', 'handler': 'ms_graph', 'configured': ms_token.configured}
 
 
 @router.get('/onedrive/root')
