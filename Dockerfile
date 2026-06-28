@@ -23,5 +23,20 @@ RUN pip install --no-cache-dir -r requirements.txt
 # copy app
 COPY . /app
 
+# Run as an unprivileged user. Writable runtime state (audit log, office
+# output) lives under /data so a read-only /app bind-mount doesn't break it.
+RUN useradd --create-home --uid 10001 app \
+  && mkdir -p /data/output \
+  && chown -R app:app /app /data
+USER app
+
+ENV AUDIT_LOG_PATH=/data/audit.log \
+    OFFICE_OUTPUT_DIR=/data/output
+
 EXPOSE 8080
+
+# Liveness probe (no auth required); pure-stdlib so no extra packages needed.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+  CMD ["python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8080/health/live', timeout=4).status==200 else 1)"]
+
 CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080"]

@@ -8,6 +8,7 @@ services:
     volumes:
       - ./:/app:ro
       - /var/run/docker.sock:/var/run/docker.sock  # only if docker access required
+      - gateway_data:/data                          # writable: audit log + office output
     ports:
       - '8080:8080'
     restart: unless-stopped
@@ -37,6 +38,7 @@ services:
 volumes:
   pgdata: {}
   redisdata: {}
+  gateway_data: {}
 
 networks:
   default:

@@ -12,6 +12,20 @@ client = TestClient(app)
 
 # --- module: events are written as JSON lines and read back newest-first -----
 
+def test_setup_falls_back_when_path_unwritable(monkeypatch):
+    logger = logging.getLogger(audit.AUDIT_LOGGER_NAME)
+    # Drop the file handler so setup re-runs its attach logic.
+    for h in [h for h in logger.handlers if getattr(h, '_mcp_audit', False)]:
+        logger.removeHandler(h)
+    monkeypatch.setenv('AUDIT_LOG_PATH', '/proc/cannot/create/here/audit.log')
+    # Must not raise even though the path is unwritable.
+    audit.setup_audit_logging()
+    assert not any(getattr(h, '_mcp_audit', False) for h in logger.handlers)
+    # Restore a working handler for the rest of the suite.
+    monkeypatch.undo()
+    audit.setup_audit_logging()
+
+
 def test_setup_is_idempotent():
     audit.setup_audit_logging()
     before = len(logging.getLogger(audit.AUDIT_LOGGER_NAME).handlers)

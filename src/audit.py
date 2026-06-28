@@ -50,11 +50,18 @@ def setup_audit_logging() -> logging.Logger:
             return logger  # already configured
 
     path = audit_log_path()
-    directory = os.path.dirname(path)
-    if directory:
-        os.makedirs(directory, exist_ok=True)
+    try:
+        directory = os.path.dirname(path)
+        if directory:
+            os.makedirs(directory, exist_ok=True)
+        handler = RotatingFileHandler(path, maxBytes=5_000_000, backupCount=5, encoding='utf-8')
+    except OSError as exc:
+        # Read-only / unwritable path: keep the gateway running, audit stays
+        # in-memory only (still emitted to the console via the root logger).
+        logging.getLogger(__name__).warning(
+            'audit log path %r is not writable (%s); persistence disabled', path, exc)
+        return logger
 
-    handler = RotatingFileHandler(path, maxBytes=5_000_000, backupCount=5, encoding='utf-8')
     handler.setFormatter(_JsonAuditFormatter())
     handler._mcp_audit = True  # marker for idempotency
     logger.addHandler(handler)
